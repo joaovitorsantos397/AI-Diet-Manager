@@ -14,7 +14,8 @@
 }
 
 .language-card,
-.welcome-card {
+.welcome-card,
+.choice-card {
   width: 100%;
   max-width: 560px;
   padding: 48px;
@@ -56,13 +57,15 @@ h1 {
   line-height: 1.55;
 }
 
-.language-options {
+.language-options,
+.choice-list {
   display: grid;
   gap: 14px;
   margin-top: 36px;
 }
 
-.language-button {
+.language-button,
+.choice-button {
   width: 100%;
   display: flex;
   align-items: center;
@@ -84,27 +87,36 @@ h1 {
     border-color 160ms ease;
 }
 
-.language-button:hover {
+.language-button:hover,
+.choice-button:hover {
   transform: translateY(-2px);
   border-color: var(--color-border-hover);
 
   box-shadow: var(--shadow-hover);
 }
 
-.flag {
+.choice-button-selected {
+  border-color: var(--color-accent);
+  background: var(--color-accent-glow);
+}
+
+.option-icon {
   font-size: 32px;
 }
 
-.language-button span:last-child {
+.language-button span:last-child,
+.choice-button span:last-child {
   display: grid;
   gap: 4px;
 }
 
-.language-button strong {
+.language-button strong,
+.choice-button strong {
   font-size: 17px;
 }
 
-.language-button small {
+.language-button small,
+.choice-button small {
   color: var(--color-text-secondary);
   font-size: 14px;
 }
@@ -132,6 +144,66 @@ h1 {
   opacity: 0.88;
 }
 
+.primary-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.field-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 36px;
+}
+
+.field-input {
+  width: 100%;
+  padding: 16px 20px;
+
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+
+  color: var(--color-text-primary);
+  background: var(--color-bg-elevated-hover);
+  font-size: 17px;
+
+  transition: border-color 160ms ease;
+}
+
+.field-input:focus {
+  outline: none;
+  border-color: var(--color-border-hover);
+}
+
+.macro-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 14px;
+  margin-top: 32px;
+}
+
+.macro-item {
+  display: grid;
+  gap: 4px;
+  padding: 16px;
+
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+
+  background: var(--color-bg-elevated-hover);
+  text-align: center;
+}
+
+.macro-item strong {
+  font-size: 20px;
+  color: var(--color-text-primary);
+}
+
+.macro-item small {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
 .text-button {
   width: 100%;
   margin-top: 14px;
@@ -150,7 +222,8 @@ h1 {
 
 @media (max-width: 600px) {
   .language-card,
-  .welcome-card {
+  .welcome-card,
+  .choice-card {
     padding: 32px 24px;
     border-radius: 24px;
   }
