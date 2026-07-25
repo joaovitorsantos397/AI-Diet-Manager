@@ -23,7 +23,7 @@ This roadmap tracks the project's progress from the MVP to future releases.
 - [x] Initial Welcome Screen
 - [x] Language Selection
 - [ ] Splash Screen
-- [ ] Theme System
+- [x] Theme System
 - [ ] Responsive Layout
 
 ---

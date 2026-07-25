@@ -111,6 +111,38 @@ Understanding why decisions are made is considered more valuable than simply kno
 
 ---
 
+# 2026-07-25
+
+## Decision
+
+Introduce a centralized, dark-first Theme System using CSS custom properties.
+
+### Reason
+
+`index.css` still contained unused leftover tokens and layout rules from the
+Vite starter template, while `App.css` hardcoded light-only colors directly
+onto `:root`. Together this silently prevented the app from ever rendering in
+dark mode, contradicting the dark-first UI principle in AGENTS.md, and left
+color/spacing decisions duplicated with no single source of truth.
+
+A dedicated `src/styles/theme.css` now defines all design tokens (color,
+radius, shadow, font) as CSS custom properties. `:root` holds the dark
+palette by default; a `prefers-color-scheme: light` override provides the
+light palette. `App.css` and `index.css` now consume these tokens instead of
+hardcoded values.
+
+No new dependency was introduced — plain CSS custom properties fit the
+existing stack.
+
+### Expected Benefits
+
+- Dark-first UI principle is actually enforced, not just documented.
+- Single source of truth for design tokens, ready for future screens.
+- Removes dead code inherited from the Vite template.
+- Easier to introduce a manual theme toggle later if needed.
+
+---
+
 # Future Decisions
 
 This section should be continuously updated as the project evolves.
