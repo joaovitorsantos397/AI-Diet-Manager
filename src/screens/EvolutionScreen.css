@@ -1,0 +1,164 @@
+.evolution {
+  height: 100vh;
+  overflow-y: auto;
+
+  background: var(--color-bg);
+}
+
+.evolution-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+}
+
+.evolution-content {
+  display: grid;
+  gap: 24px;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.evolution-chart-card {
+  padding: 20px;
+
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+
+  background: var(--color-bg-elevated);
+}
+
+.evolution-chart-card h2 {
+  margin: 0 0 16px;
+
+  color: var(--color-text-primary);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.evolution-chart {
+  display: grid;
+  gap: 6px;
+}
+
+.evolution-plot {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.evolution-target-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+
+  height: 1px;
+  background: var(--color-border);
+}
+
+.evolution-labels {
+  display: flex;
+  gap: 8px;
+}
+
+.evolution-bar-track {
+  display: flex;
+  flex: 1;
+  align-items: flex-end;
+  justify-content: center;
+  height: 100%;
+}
+
+.evolution-bar {
+  position: relative;
+  width: 20px;
+  max-width: 24px;
+  min-height: 2px;
+
+  border-radius: 4px 4px 0 0;
+  background: var(--color-accent);
+  opacity: 0.55;
+}
+
+.evolution-bar-protein {
+  background: var(--color-text-secondary);
+  opacity: 0.4;
+}
+
+.evolution-status-dot {
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.evolution-status-dot-green {
+  background: #34c759;
+}
+
+.evolution-status-dot-yellow {
+  background: #ffcc00;
+}
+
+.evolution-status-dot-red {
+  background: #ff3b30;
+}
+
+.evolution-bar-label {
+  flex: 1;
+
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  text-align: center;
+  text-transform: capitalize;
+}
+
+.evolution-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.evolution-legend span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.evolution-legend .evolution-status-dot {
+  position: static;
+  transform: none;
+}
+
+.evolution-table {
+  width: 100%;
+  border-collapse: collapse;
+
+  font-size: 13px;
+}
+
+.evolution-table th,
+.evolution-table td {
+  padding: 8px 10px;
+
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  text-align: left;
+}
+
+.evolution-table th {
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}

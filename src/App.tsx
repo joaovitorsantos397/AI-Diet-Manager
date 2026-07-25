@@ -17,6 +17,10 @@ import TrainingScheduleScreen from './screens/onboarding/TrainingScheduleScreen'
 import HormoneUseScreen from './screens/onboarding/HormoneUseScreen'
 import CoachScreen from './screens/onboarding/CoachScreen'
 import NutritionResultScreen from './screens/onboarding/NutritionResultScreen'
+import ChatScreen from './screens/ChatScreen'
+import ProfilePickerScreen from './screens/ProfilePickerScreen'
+import { saveProfile } from './services/profileStorage'
+import { getSession, saveSession } from './services/sessionStorage'
 import type { Language } from './types/language'
 import type { Goal } from './types/goal'
 import type { Sex } from './types/sex'
@@ -24,10 +28,35 @@ import type { ActivityLevel } from './types/activityLevel'
 import type { HormoneUse } from './types/hormoneUse'
 import type { TrainingRoutine } from './types/trainingRoutine'
 import type { CoachId } from './types/coach'
+import type { SavedProfile } from './types/savedProfile'
 
 function App() {
+  // In production (no dev picker), silently resume the last session
+  // saved in this browser, if any.
+  const initialSession = !import.meta.env.DEV ? getSession() : null
+
   const [showSplash, setShowSplash] = useState(true)
-  const [language, setLanguage] = useState<Language | null>(null)
+  const [language, setLanguage] = useState<Language | null>(
+    initialSession?.language ?? null,
+  )
+  const [devPickerResolved, setDevPickerResolved] = useState(
+    !import.meta.env.DEV,
+  )
+  const [loadedProfile, setLoadedProfile] = useState<SavedProfile | null>(
+    initialSession
+      ? {
+          id: 'session',
+          label: initialSession.profile.name,
+          language: initialSession.language,
+          coachId: initialSession.coachId,
+          profile: initialSession.profile,
+          messages: initialSession.messages,
+          nutritionLog: initialSession.nutritionLog,
+        }
+      : null,
+  )
+  const [activeProfileId] = useState(() => crypto.randomUUID())
+  const [isCreatingProfile, setIsCreatingProfile] = useState(false)
   const [started, setStarted] = useState(false)
   const [name, setName] = useState<string | null>(null)
   const [goal, setGoal] = useState<Goal | null>(null)
@@ -98,6 +127,47 @@ function App() {
           </button>
         </div>
       </ScreenCard>
+    )
+  }
+
+  if (!devPickerResolved) {
+    return (
+      <ProfilePickerScreen
+        language={language}
+        onContinueProfile={(saved) => {
+          setLoadedProfile(saved)
+          setDevPickerResolved(true)
+        }}
+        onCreateNew={() => {
+          setIsCreatingProfile(true)
+          setDevPickerResolved(true)
+        }}
+      />
+    )
+  }
+
+  if (loadedProfile) {
+    return (
+      <ChatScreen
+        language={loadedProfile.language}
+        coachId={loadedProfile.coachId}
+        profile={loadedProfile.profile}
+        initialMessages={loadedProfile.messages}
+        initialNutritionLog={loadedProfile.nutritionLog}
+        onStateChange={(messages, nutritionLog) => {
+          if (import.meta.env.DEV) {
+            saveProfile({ ...loadedProfile, messages, nutritionLog })
+          } else {
+            saveSession({
+              language: loadedProfile.language,
+              coachId: loadedProfile.coachId,
+              profile: loadedProfile.profile,
+              messages,
+              nutritionLog,
+            })
+          }
+        }}
+      />
     )
   }
 
@@ -241,15 +311,34 @@ function App() {
   }
 
   return (
-    <ScreenCard cardClassName="welcome-card">
-      <h1>{language === 'pt' ? 'Em breve: o chat' : 'Coming soon: the chat'}</h1>
-
-      <p className="subtitle">
-        {language === 'pt'
-          ? 'A conversa com o coach de IA ainda está em construção.'
-          : 'The AI coach conversation is still under construction.'}
-      </p>
-    </ScreenCard>
+    <ChatScreen
+      language={language}
+      coachId={coach}
+      profile={profile}
+      onStateChange={(messages, nutritionLog) => {
+        if (import.meta.env.DEV) {
+          if (isCreatingProfile) {
+            saveProfile({
+              id: activeProfileId,
+              label: name,
+              language,
+              coachId: coach,
+              profile,
+              messages,
+              nutritionLog,
+            })
+          }
+        } else {
+          saveSession({
+            language,
+            coachId: coach,
+            profile,
+            messages,
+            nutritionLog,
+          })
+        }
+      }}
+    />
   )
 }
 
