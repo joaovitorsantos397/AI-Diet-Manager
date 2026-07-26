@@ -123,7 +123,10 @@ function ChatScreen({
     messagesEndRef.current?.scrollIntoView({ block: 'end' })
   }, [messages, isSending])
 
-  async function sendToModel(fullMessages: ChatMessage[]) {
+  async function sendToModel(
+    fullMessages: ChatMessage[],
+    useTypingDelay = false,
+  ) {
     lastAttemptRef.current = fullMessages
     setIsSending(true)
 
@@ -174,7 +177,7 @@ function ChatScreen({
             ...(level ? { feedbackLevel: level } : {}),
           },
         ])
-        if (index < parts.length - 1) {
+        if (useTypingDelay && index < parts.length - 1) {
           await new Promise((resolve) => setTimeout(resolve, 600))
         }
       }
@@ -222,7 +225,7 @@ function ChatScreen({
       content: buildKickoffPrompt(language, profile.name),
       timestamp: Date.now(),
     }
-    sendToModel([kickoffMessage])
+    sendToModel([kickoffMessage], true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
