@@ -6,16 +6,20 @@ import type { CoachId } from '../types/coach'
 import type { ChatMessage } from '../types/message'
 import type { UserProfile } from '../types/userProfile'
 import type { NutritionLogEntry } from '../types/nutritionLogEntry'
+import type { WeightLogEntry } from '../types/weightLogEntry'
 import { COACHES } from '../data/coaches'
 import { sendChatMessage } from '../services/chatService'
+import { transcribeAudio } from '../services/transcriptionService'
 import { buildSystemInstruction } from '../services/promptBuilder'
 import { extractNutritionData } from '../services/nutritionExtractor'
+import { extractWeightData } from '../services/weightExtractor'
 import { extractFeedbackLevel } from '../services/feedbackExtractor'
 import { extractCorrection } from '../services/correctionExtractor'
 import { calculateDailyCalories } from '../services/calorieCalculator'
 import { calculateMacros } from '../services/macroCalculator'
 import { getTotalsForDay } from '../services/nutritionLog'
 import { isSameDay } from '../utils/date'
+import { resizeImageForUpload } from '../utils/image'
 import EvolutionScreen from './EvolutionScreen'
 
 type ChatScreenProps = {
@@ -24,9 +28,11 @@ type ChatScreenProps = {
   profile: UserProfile
   initialMessages?: ChatMessage[]
   initialNutritionLog?: NutritionLogEntry[]
+  initialWeightLog?: WeightLogEntry[]
   onStateChange?: (
     messages: ChatMessage[],
     nutritionLog: NutritionLogEntry[],
+    weightLog: WeightLogEntry[],
   ) => void
 }
 
@@ -56,6 +62,15 @@ function blobToBase64(blob: Blob): Promise<string> {
     reader.onerror = reject
     reader.readAsDataURL(blob)
   })
+}
+
+type PendingAudio = {
+  audioUrl: string
+  base64Data: string
+  mimeType: string
+  transcript: string | null
+  isTranscribing: boolean
+  transcriptFailed: boolean
 }
 
 function getDateDividerLabel(timestamp: number, language: Language): string {
@@ -90,6 +105,7 @@ function ChatScreen({
   profile,
   initialMessages,
   initialNutritionLog,
+  initialWeightLog,
   onStateChange,
 }: ChatScreenProps) {
   const coach = COACHES.find((option) => option.value === coachId)!
@@ -98,10 +114,14 @@ function ChatScreen({
   )
   const [draft, setDraft] = useState('')
   const [isRecording, setIsRecording] = useState(false)
+  const [pendingAudio, setPendingAudio] = useState<PendingAudio | null>(null)
   const [isSending, setIsSending] = useState(false)
   const [showEvolution, setShowEvolution] = useState(false)
   const [nutritionLog, setNutritionLog] = useState<NutritionLogEntry[]>(
     initialNutritionLog ?? [],
+  )
+  const [weightLog, setWeightLog] = useState<WeightLogEntry[]>(
+    initialWeightLog ?? [],
   )
   const fileInputRef = useRef<HTMLInputElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -115,9 +135,9 @@ function ChatScreen({
   const todayTotals = getTotalsForDay(nutritionLog)
 
   useEffect(() => {
-    onStateChange?.(messages, nutritionLog)
+    onStateChange?.(messages, nutritionLog, weightLog)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, nutritionLog])
+  }, [messages, nutritionLog, weightLog])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: 'end' })
@@ -137,27 +157,50 @@ function ChatScreen({
           coachId,
           profile,
           language,
+          nutritionLog,
+          weightLog,
         }),
       })
 
       const { cleanedReply: replyAfterNutrition, entry } =
         extractNutritionData(reply)
-      const { cleanedReply: replyAfterCorrection, shouldRemoveLast } =
-        extractCorrection(replyAfterNutrition)
+      const { cleanedReply: replyAfterWeight, entry: weightEntry } =
+        extractWeightData(replyAfterNutrition)
+      const {
+        cleanedReply: replyAfterCorrection,
+        shouldRemoveLast,
+        removeMealTime,
+      } = extractCorrection(replyAfterWeight)
       const { cleanedReply, level } = extractFeedbackLevel(
         replyAfterCorrection,
       )
 
-      if (shouldRemoveLast || entry) {
+      if (shouldRemoveLast || removeMealTime || entry) {
         setNutritionLog((current) => {
-          const withoutLast = shouldRemoveLast ? current.slice(0, -1) : current
+          let updated = shouldRemoveLast ? current.slice(0, -1) : current
+          if (removeMealTime) {
+            updated = updated.filter(
+              (logEntry) =>
+                !(
+                  logEntry.mealTime === removeMealTime &&
+                  isSameDay(new Date(logEntry.timestamp), new Date())
+                ),
+            )
+          }
           return entry
             ? [
-                ...withoutLast,
+                ...updated,
                 { id: crypto.randomUUID(), timestamp: Date.now(), ...entry },
               ]
-            : withoutLast
+            : updated
         })
+      }
+
+      if (weightEntry) {
+        setWeightLog((current) => [
+          ...current,
+          { id: crypto.randomUUID(), timestamp: Date.now(), ...weightEntry },
+        ])
       }
 
       const parts = cleanedReply
@@ -259,15 +302,16 @@ function ChatScreen({
       return
     }
 
-    const imageUrl = URL.createObjectURL(file)
-    const base64Data = await blobToBase64(file)
+    const uploadBlob = await resizeImageForUpload(file)
+    const imageUrl = URL.createObjectURL(uploadBlob)
+    const base64Data = await blobToBase64(uploadBlob)
     const newMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'user',
       type: 'image',
       imageUrl,
       base64Data,
-      mimeType: file.type,
+      mimeType: uploadBlob.type || file.type,
       timestamp: Date.now(),
     }
     const fullMessages = [...messages, newMessage]
@@ -301,19 +345,34 @@ function ChatScreen({
         const base64Data = await blobToBase64(audioBlob)
         stream.getTracks().forEach((track) => track.stop())
 
-        const newMessage: ChatMessage = {
-          id: crypto.randomUUID(),
-          role: 'user',
-          type: 'audio',
+        setPendingAudio({
           audioUrl,
           base64Data,
           mimeType,
-          timestamp: Date.now(),
-        }
-        const fullMessages = [...messages, newMessage]
+          transcript: null,
+          isTranscribing: true,
+          transcriptFailed: false,
+        })
 
-        setMessages(fullMessages)
-        await sendToModel(fullMessages)
+        try {
+          const transcript = await transcribeAudio({
+            base64Data,
+            mimeType,
+            language,
+          })
+          setPendingAudio((current) =>
+            current && current.audioUrl === audioUrl
+              ? { ...current, transcript, isTranscribing: false }
+              : current,
+          )
+        } catch (error) {
+          console.error('Audio transcription failed', error)
+          setPendingAudio((current) =>
+            current && current.audioUrl === audioUrl
+              ? { ...current, isTranscribing: false, transcriptFailed: true }
+              : current,
+          )
+        }
       }
 
       recorder.start()
@@ -324,11 +383,47 @@ function ChatScreen({
     }
   }
 
+  function handleDiscardPendingAudio() {
+    if (!pendingAudio) {
+      return
+    }
+    URL.revokeObjectURL(pendingAudio.audioUrl)
+    setPendingAudio(null)
+  }
+
+  async function handleRerecordAudio() {
+    handleDiscardPendingAudio()
+    await handleToggleRecording()
+  }
+
+  async function handleConfirmPendingAudio() {
+    if (!pendingAudio || isSending) {
+      return
+    }
+
+    const { audioUrl, base64Data, mimeType } = pendingAudio
+    const newMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      type: 'audio',
+      audioUrl,
+      base64Data,
+      mimeType,
+      timestamp: Date.now(),
+    }
+    const fullMessages = [...messages, newMessage]
+
+    setPendingAudio(null)
+    setMessages(fullMessages)
+    await sendToModel(fullMessages)
+  }
+
   if (showEvolution) {
     return (
       <EvolutionScreen
         language={language}
         nutritionLog={nutritionLog}
+        weightLog={weightLog}
         targetCalories={calories}
         targetProtein={macros.proteinGrams}
         onClose={() => setShowEvolution(false)}
@@ -339,7 +434,9 @@ function ChatScreen({
   return (
     <div className="chat">
       <header className="chat-header">
-        <span className="option-icon">{coach.icon}</span>
+        <span className="option-icon" aria-hidden="true">
+          {coach.icon}
+        </span>
 
         <div className="chat-header-info">
           <strong>{coach.name[language]}</strong>
@@ -360,7 +457,7 @@ function ChatScreen({
         </button>
       </header>
 
-      <div className="chat-messages">
+      <div className="chat-messages" role="log" aria-live="polite">
         {messages.length === 0 && !isSending ? (
           <p className="chat-empty">
             {language === 'pt'
@@ -446,7 +543,10 @@ function ChatScreen({
         )}
 
         {isSending && (
-          <div className="chat-bubble chat-bubble-coach chat-bubble-typing">
+          <div
+            className="chat-bubble chat-bubble-coach chat-bubble-typing"
+            aria-label={language === 'pt' ? 'Digitando…' : 'Typing…'}
+          >
             <span />
             <span />
             <span />
@@ -455,6 +555,48 @@ function ChatScreen({
 
         <div ref={messagesEndRef} />
       </div>
+
+      {pendingAudio && (
+        <div className="chat-audio-preview">
+          <audio
+            className="chat-audio-preview-player"
+            src={pendingAudio.audioUrl}
+            controls
+          />
+
+          <p className="chat-audio-preview-transcript">
+            {pendingAudio.isTranscribing
+              ? language === 'pt'
+                ? 'Transcrevendo…'
+                : 'Transcribing…'
+              : pendingAudio.transcriptFailed
+                ? language === 'pt'
+                  ? 'Não consegui transcrever — confira o áudio antes de enviar.'
+                  : "Couldn't transcribe — check the audio before sending."
+                : `“${pendingAudio.transcript}”`}
+          </p>
+
+          <div className="chat-audio-preview-actions">
+            <button
+              type="button"
+              className="chat-audio-preview-rerecord"
+              onClick={handleRerecordAudio}
+              disabled={isSending}
+            >
+              🔄 {language === 'pt' ? 'Regravar' : 'Re-record'}
+            </button>
+
+            <button
+              type="button"
+              className="chat-audio-preview-confirm"
+              onClick={handleConfirmPendingAudio}
+              disabled={isSending || pendingAudio.isTranscribing}
+            >
+              ✔️ {language === 'pt' ? 'Confirmar e enviar' : 'Confirm and send'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <form className="chat-composer" onSubmit={handleSubmit}>
         <input
@@ -470,7 +612,7 @@ function ChatScreen({
           className="chat-icon-button"
           onClick={() => fileInputRef.current?.click()}
           aria-label={language === 'pt' ? 'Anexar foto' : 'Attach photo'}
-          disabled={isSending}
+          disabled={isSending || !!pendingAudio}
         >
           📷
         </button>
@@ -492,7 +634,7 @@ function ChatScreen({
                 ? 'Gravar áudio'
                 : 'Record audio'
           }
-          disabled={isSending}
+          disabled={isSending || !!pendingAudio}
         >
           {isRecording ? '⏹️' : '🎙️'}
         </button>
@@ -505,10 +647,17 @@ function ChatScreen({
           placeholder={
             language === 'pt' ? 'Digite sua refeição...' : 'Type your meal...'
           }
-          disabled={isSending}
+          aria-label={
+            language === 'pt' ? 'Digite sua refeição' : 'Type your meal'
+          }
+          disabled={isSending || !!pendingAudio}
         />
 
-        <button type="submit" className="chat-send-button" disabled={isSending}>
+        <button
+          type="submit"
+          className="chat-send-button"
+          disabled={isSending || !!pendingAudio}
+        >
           {language === 'pt' ? 'Enviar' : 'Send'}
         </button>
       </form>

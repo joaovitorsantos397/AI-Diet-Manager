@@ -2,24 +2,85 @@ import { useState } from 'react'
 import './EvolutionScreen.css'
 import type { Language } from '../types/language'
 import type { NutritionLogEntry } from '../types/nutritionLogEntry'
-import { getDailySeries } from '../services/nutritionLog'
+import type { WeightLogEntry } from '../types/weightLogEntry'
+import { getAdherenceStreakDays, getDailySeries } from '../services/nutritionLog'
 import type { DailySummary } from '../services/nutritionLog'
+import { getRecentWeightEntries } from '../services/weightLog'
 
 type EvolutionScreenProps = {
   language: Language
   nutritionLog: NutritionLogEntry[]
+  weightLog: WeightLogEntry[]
   targetCalories: number
   targetProtein: number
   onClose: () => void
 }
 
 const DAYS_TO_SHOW = 7
+const WEIGHT_ENTRIES_TO_SHOW = 8
 const PLOT_HEIGHT_PX = 140
 
 function formatDayLabel(date: Date, language: Language): string {
   return new Intl.DateTimeFormat(language === 'pt' ? 'pt-BR' : 'en-US', {
     weekday: 'short',
   }).format(date)
+}
+
+function formatWeightDateLabel(date: Date, language: Language): string {
+  return new Intl.DateTimeFormat(language === 'pt' ? 'pt-BR' : 'en-US', {
+    day: 'numeric',
+    month: 'short',
+  }).format(date)
+}
+
+type WeightChartProps = {
+  language: Language
+  entries: WeightLogEntry[]
+}
+
+function WeightChart({ language, entries }: WeightChartProps) {
+  const weights = entries.map((entry) => entry.weightKg)
+  const min = Math.min(...weights)
+  const max = Math.max(...weights)
+  const range = max - min
+
+  return (
+    <div className="evolution-chart">
+      <div
+        className="evolution-plot"
+        style={{ height: `${PLOT_HEIGHT_PX}px` }}
+      >
+        {entries.map((entry) => {
+          const heightPercent =
+            range > 0 ? 20 + ((entry.weightKg - min) / range) * 80 : 60
+          const date = new Date(entry.timestamp)
+          const title = `${formatWeightDateLabel(date, language)}: ${entry.weightKg}kg${
+            entry.bodyFatPercentage !== null
+              ? ` · ${entry.bodyFatPercentage}% ${language === 'pt' ? 'gordura' : 'body fat'}`
+              : ''
+          }`
+
+          return (
+            <div key={entry.id} className="evolution-bar-track">
+              <div
+                className="evolution-bar evolution-bar-weight"
+                style={{ height: `${heightPercent}%` }}
+                title={title}
+              />
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="evolution-labels">
+        {entries.map((entry) => (
+          <span key={entry.id} className="evolution-bar-label">
+            {formatWeightDateLabel(new Date(entry.timestamp), language)}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 type MiniBarChartProps = {
@@ -89,12 +150,22 @@ function MiniBarChart({
 function EvolutionScreen({
   language,
   nutritionLog,
+  weightLog,
   targetCalories,
   targetProtein,
   onClose,
 }: EvolutionScreenProps) {
   const [showTable, setShowTable] = useState(false)
   const series = getDailySeries(nutritionLog, targetCalories, DAYS_TO_SHOW)
+  const recentWeightEntries = getRecentWeightEntries(
+    weightLog,
+    WEIGHT_ENTRIES_TO_SHOW,
+  )
+  const streakDays = getAdherenceStreakDays(
+    nutritionLog,
+    targetCalories,
+    targetProtein,
+  )
 
   const maxCalories = Math.max(
     targetCalories,
@@ -122,6 +193,27 @@ function EvolutionScreen({
       </header>
 
       <div className="evolution-content">
+        <div className="evolution-streak">
+          {streakDays > 0 ? (
+            <>
+              <span className="evolution-streak-flame" aria-hidden="true">
+                🔥
+              </span>
+              <span>
+                {language === 'pt'
+                  ? `${streakDays} ${streakDays === 1 ? 'dia seguido' : 'dias seguidos'} na meta`
+                  : `${streakDays} day${streakDays === 1 ? '' : 's'} in a row on target`}
+              </span>
+            </>
+          ) : (
+            <span className="evolution-streak-empty">
+              {language === 'pt'
+                ? 'Nenhum streak ativo — bata calorias e proteína hoje pra começar um.'
+                : 'No active streak — hit calories and protein today to start one.'}
+            </span>
+          )}
+        </div>
+
         <section className="evolution-chart-card">
           <h2>{language === 'pt' ? 'Calorias' : 'Calories'}</h2>
           <MiniBarChart
@@ -150,6 +242,19 @@ function EvolutionScreen({
             }
             barClassName="evolution-bar-protein"
           />
+        </section>
+
+        <section className="evolution-chart-card">
+          <h2>{language === 'pt' ? 'Peso' : 'Weight'}</h2>
+          {recentWeightEntries.length > 0 ? (
+            <WeightChart language={language} entries={recentWeightEntries} />
+          ) : (
+            <p className="evolution-empty-hint">
+              {language === 'pt'
+                ? 'Nenhuma pesagem registrada ainda — conte pro seu coach quando pesar ou medir a bioimpedância.'
+                : "No weigh-ins logged yet — tell your coach when you weigh in or measure body composition."}
+            </p>
+          )}
         </section>
 
         <div className="evolution-legend">

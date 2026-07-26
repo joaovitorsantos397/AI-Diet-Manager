@@ -3,6 +3,7 @@ import type { CoachId } from '../types/coach'
 import type { UserProfile } from '../types/userProfile'
 import type { ChatMessage } from '../types/message'
 import type { NutritionLogEntry } from '../types/nutritionLogEntry'
+import type { WeightLogEntry } from '../types/weightLogEntry'
 
 const STORAGE_KEY = 'ai-diet-manager:session'
 
@@ -12,6 +13,7 @@ export type StoredSession = {
   profile: UserProfile
   messages: ChatMessage[]
   nutritionLog: NutritionLogEntry[]
+  weightLog: WeightLogEntry[]
 }
 
 export function getSession(): StoredSession | null {

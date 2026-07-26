@@ -1,5 +1,7 @@
 .evolution {
   height: 100vh;
+  max-width: 720px;
+  margin: 0 auto;
   overflow-y: auto;
 
   background: var(--color-bg);
@@ -21,6 +23,30 @@
   max-width: 480px;
   margin: 0 auto;
   padding: 24px;
+}
+
+.evolution-streak {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.evolution-streak-flame {
+  font-size: 20px;
+}
+
+.evolution-streak-empty {
+  color: var(--color-text-secondary);
+  font-weight: 400;
 }
 
 .evolution-chart-card {
@@ -88,6 +114,18 @@
 .evolution-bar-protein {
   background: var(--color-text-secondary);
   opacity: 0.4;
+}
+
+.evolution-bar-weight {
+  background: var(--color-accent);
+  opacity: 0.75;
+}
+
+.evolution-empty-hint {
+  margin: 0;
+
+  color: var(--color-text-secondary);
+  font-size: 13px;
 }
 
 .evolution-status-dot {
@@ -161,4 +199,18 @@
 .evolution-table th {
   color: var(--color-text-secondary);
   font-weight: 600;
+}
+
+@media (max-width: 420px) {
+  .evolution-header {
+    padding: 16px;
+  }
+
+  .evolution-content {
+    padding: 16px;
+  }
+
+  .evolution-chart-card {
+    padding: 16px;
+  }
 }

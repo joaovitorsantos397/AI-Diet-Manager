@@ -52,6 +52,7 @@ function App() {
           profile: initialSession.profile,
           messages: initialSession.messages,
           nutritionLog: initialSession.nutritionLog,
+          weightLog: initialSession.weightLog,
         }
       : null,
   )
@@ -154,9 +155,15 @@ function App() {
         profile={loadedProfile.profile}
         initialMessages={loadedProfile.messages}
         initialNutritionLog={loadedProfile.nutritionLog}
-        onStateChange={(messages, nutritionLog) => {
+        initialWeightLog={loadedProfile.weightLog}
+        onStateChange={(messages, nutritionLog, weightLog) => {
           if (import.meta.env.DEV) {
-            saveProfile({ ...loadedProfile, messages, nutritionLog })
+            saveProfile({
+              ...loadedProfile,
+              messages,
+              nutritionLog,
+              weightLog,
+            })
           } else {
             saveSession({
               language: loadedProfile.language,
@@ -164,6 +171,7 @@ function App() {
               profile: loadedProfile.profile,
               messages,
               nutritionLog,
+              weightLog,
             })
           }
         }}
@@ -315,7 +323,7 @@ function App() {
       language={language}
       coachId={coach}
       profile={profile}
-      onStateChange={(messages, nutritionLog) => {
+      onStateChange={(messages, nutritionLog, weightLog) => {
         if (import.meta.env.DEV) {
           if (isCreatingProfile) {
             saveProfile({
@@ -326,6 +334,7 @@ function App() {
               profile,
               messages,
               nutritionLog,
+              weightLog,
             })
           }
         } else {
@@ -335,6 +344,7 @@ function App() {
             profile,
             messages,
             nutritionLog,
+            weightLog,
           })
         }
       }}

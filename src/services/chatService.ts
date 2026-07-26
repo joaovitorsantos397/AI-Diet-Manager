@@ -5,13 +5,24 @@ type SendChatMessageParams = {
   systemInstruction: string
 }
 
-function messageToPart(message: ChatMessage) {
-  if (message.type === 'text') {
-    return { text: message.content }
-  }
-  return {
-    inlineData: { mimeType: message.mimeType, data: message.base64Data },
-  }
+function formatClockTime(timestamp: number): string {
+  const date = new Date(timestamp)
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${hours}:${minutes}`
+}
+
+function messageToParts(message: ChatMessage) {
+  // A leading clock-time part gives the model real chronological context
+  // for every turn — otherwise it has no way to reason about elapsed time
+  // between messages or when a meal actually happened.
+  const timePart = { text: `[${formatClockTime(message.timestamp)}]` }
+  const contentPart =
+    message.type === 'text'
+      ? { text: message.content }
+      : { inlineData: { mimeType: message.mimeType, data: message.base64Data } }
+
+  return [timePart, contentPart]
 }
 
 export async function sendChatMessage({
@@ -20,7 +31,7 @@ export async function sendChatMessage({
 }: SendChatMessageParams): Promise<string> {
   const contents = messages.map((message) => ({
     role: message.role === 'user' ? 'user' : 'model',
-    parts: [messageToPart(message)],
+    parts: messageToParts(message),
   }))
 
   const response = await fetch('/api/chat', {
