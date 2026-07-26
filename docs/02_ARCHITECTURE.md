@@ -23,6 +23,12 @@ Frontend
 - TypeScript
 - Vite
 
+Backend
+
+- Node.js
+- Express
+- Gemini API (`@google/genai`)
+
 Development
 
 - VS Code
