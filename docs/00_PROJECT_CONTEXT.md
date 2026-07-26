@@ -58,7 +58,7 @@ Development
 
 Future
 
-- AI APIs
+- Gemini API
 - Database
 - Authentication
 - Mobile version

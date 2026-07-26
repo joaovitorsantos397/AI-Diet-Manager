@@ -15,6 +15,9 @@ dist-ssr
 # Secrets
 .env
 
+# Private notes — never pushed to GitHub (see academy-private/README.md)
+academy-private/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

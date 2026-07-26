@@ -9,4 +9,6 @@ This directory contains the project's technical and product documentation.
 - 02_ARCHITECTURE.md — Technical architecture
 - 03_DECISION_LOG.md — Engineering decisions
 - 04_ROADMAP.md — Development roadmap
+- 05_PROJECT_FAQ.md — Project FAQ and retrospective
+- 06_DESIGN_SYSTEM.md — Visual and interaction design language
 - 99_AI_CONTEXT.md — Instructions for future AI assistants

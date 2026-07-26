@@ -51,7 +51,7 @@ Development
 
 Future
 
-- AI APIs
+- Gemini API
 - Database
 - Authentication
 - Apple Health Integration
@@ -84,6 +84,8 @@ Detailed documentation is available in the `docs/` directory.
 | 02_ARCHITECTURE.md | Technical architecture |
 | 03_DECISION_LOG.md | Engineering decisions |
 | 04_ROADMAP.md | Project roadmap |
+| 05_PROJECT_FAQ.md | Project FAQ and retrospective |
+| 06_DESIGN_SYSTEM.md | Visual and interaction design language |
 | 99_AI_CONTEXT.md | Context for future AI assistants |
 
 ---
@@ -111,11 +113,27 @@ Install dependencies:
 npm install
 ```
 
-Start the development server:
+Create a `.env` file (see `.env.example`) with your own Gemini API key
+(free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)):
+
+```bash
+GEMINI_API_KEY=your-key-here
+```
+
+Start the backend (holds the API key, proxies chat requests):
+
+```bash
+npm run server
+```
+
+In a second terminal, start the frontend:
 
 ```bash
 npm run dev
 ```
+
+Both need to be running for the chat to work — the frontend alone
+will load, but AI replies require the backend.
 
 Build for production:
 
