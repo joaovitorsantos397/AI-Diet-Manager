@@ -14,4 +14,5 @@ export type SavedProfile = {
   messages: ChatMessage[]
   nutritionLog: NutritionLogEntry[]
   weightLog: WeightLogEntry[]
+  bandejaoUser: boolean | null
 }

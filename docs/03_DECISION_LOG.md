@@ -1264,6 +1264,124 @@ Two distinct bugs, reported together but different in cause:
 
 ---
 
+# 2026-07-27
+
+## Decision
+
+Integrate with the sibling Bandejão Tracker project so the coach can
+ground meal estimates in Unicamp's actual bandejão (RU) menu, instead
+of guessing generically when a user says they ate there.
+
+### Reason
+
+Many Unicamp students eat at the RU rather than cooking, and without
+knowing what was actually on offer that day, the coach could only
+guess at a bandejão meal's composition the same way it would for any
+unphotographed food — far less accurate than it could be, given the
+menu is public information. Rather than duplicating menu-tracking
+logic inside this app, it reuses the separate Bandejao Tracker project
+(which already publishes the daily cardápio) through a thin Vite dev
+proxy (`/bandejao` → `http://localhost:3002`, mirroring the existing
+`/api` → backend proxy pattern), keeping menu ownership in one place.
+
+The chat asks whether the user is a bandejão user exactly once, early
+in the conversation, via the same self-reported-marker pattern used
+elsewhere (`BANDEJAO_USER:yes|no`, extracted by
+`bandejaoUserExtractor.ts`); the answer is persisted on the profile/
+session (`bandejaoUser`) so it's never asked twice. If the Bandejao
+Tracker service is unreachable or returns an error,
+`bandejaoService.ts` returns `null` and the coach simply proceeds
+without RU context rather than breaking the conversation — this app
+must keep working even when that sibling service isn't running.
+
+### Expected Benefits
+
+- Meal estimates for bandejão users are grounded in the actual dishes
+  offered that day (including the vegan lunch/dinner alternatives)
+  instead of a generic guess.
+- No duplicated menu-tracking logic — the Bandejao Tracker project
+  stays the single source of truth for the daily cardápio.
+- Graceful degradation matches the existing pattern for optional
+  external dependencies in this app (see the Gemini backend proxy
+  decision) — an unavailable dependency degrades a feature, it doesn't
+  break the app.
+
+---
+
+# 2026-07-27
+
+## Decision
+
+Make calorie/macro targets track the user's most recently *logged*
+weight (and, when reported, a refreshed measured BMR) instead of the
+value captured once at onboarding. Add a concrete, 14-day data-driven
+trigger for the coach to proactively ask for a new weigh-in, and have
+the app itself (not the model) post a message with the recalculated
+numbers whenever a new weight is logged.
+
+### Reason
+
+A real gap surfaced while discussing the app's fit for hormone-using
+bodybuilders in a bulk (a scenario where meaningful weight change over
+weeks is the point, not an edge case): the app already logged
+weigh-ins (`weightLog`, shown on the Evolution screen) and even
+displayed the latest one in the system prompt's health-history
+context, but the actual calorie/protein/carb/fat/water targets were
+still computed from `profile.weight` — the value from onboarding,
+frozen for the life of the profile. Someone who gained real weight
+over a cycle would keep seeing targets sized for their old body,
+silently, with no error and no obvious symptom short of noticing the
+numbers hadn't moved.
+
+A new `getEffectiveProfile` helper (`services/weightLog.ts`) resolves
+the weight to use for calculation from the latest logged entry
+(falling back to the onboarding value if none exists), and does the
+same for measured BMR — looking back through the log for the most
+recent entry that actually included one, since a plain weigh-in
+doesn't always carry a fresh BMR reading, so a later plain scale
+update can't silently erase a previously reported measured value.
+Both `ChatScreen.tsx` (on-screen counters) and `promptBuilder.ts` (the
+system prompt) now compute targets from this effective profile instead
+of the raw one, so the displayed numbers and what the coach reasons
+from never diverge. Because protein and water were already computed
+per kg of body weight, this recalculation scales those too, not just
+calories.
+
+The existing "weigh-in cadence" guidance was a soft, undated nudge
+("mention this lightly and occasionally") with no actual signal behind
+it. The system prompt now computes `daysSinceLastWeighIn` (from the
+last logged entry, or from the conversation's first message if none
+was ever logged) and instructs the coach to proactively bring it up,
+in its own words, once that reaches 14 days — suggesting a monthly
+bioimpedance check specifically when that's the more relevant cadence,
+per the product's existing weekly-weight/monthly-bioimpedance
+distinction.
+
+Finally, a recalculation should never happen silently. Whenever a
+`WEIGHT_DATA` entry is captured, `ChatScreen.tsx` now appends its own
+chat message stating the newly recalculated targets, computed by the
+app's own calculator rather than left to the model's prose — the same
+"ground truth is app-computed, not model arithmetic" principle already
+used for `NUTRITION_DATA` and the health-history context block.
+
+### Expected Benefits
+
+- Targets never silently go stale as the user's weight (or measured
+  BMR) changes over the course of a diet or bulk — the exact gap that
+  prompted this change.
+- The 14-day reminder is a concrete, testable trigger instead of a
+  vague "ask occasionally" instruction with nothing behind it.
+- The user is always told, in plain numbers, exactly when and why
+  their targets changed, instead of the counters just quietly shifting
+  underneath them.
+- Verified with `tsc --noEmit` and `npm run lint`; a live end-to-end
+  check (logging a new weight in the running app and confirming the
+  on-screen counters and the new chat message agree) is still
+  outstanding, per this project's existing convention of verifying
+  behavior in the running app before calling a change fully done.
+
+---
+
 # Future Decisions
 
 This section should be continuously updated as the project evolves.

@@ -3,4 +3,5 @@ export type WeightLogEntry = {
   timestamp: number
   weightKg: number
   bodyFatPercentage: number | null
+  basalMetabolicRate: number | null
 }

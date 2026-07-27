@@ -11,12 +11,16 @@ import { COACHES } from '../data/coaches'
 import { sendChatMessage } from '../services/chatService'
 import { transcribeAudio } from '../services/transcriptionService'
 import { buildSystemInstruction } from '../services/promptBuilder'
+import { fetchTodaysBandejaoMenu } from '../services/bandejaoService'
+import { extractBandejaoUser } from '../services/bandejaoUserExtractor'
+import type { BandejaoMenu } from '../types/bandejaoMenu'
 import { extractNutritionData } from '../services/nutritionExtractor'
 import { extractWeightData } from '../services/weightExtractor'
 import { extractFeedbackLevel } from '../services/feedbackExtractor'
 import { extractCorrection } from '../services/correctionExtractor'
 import { calculateDailyCalories } from '../services/calorieCalculator'
 import { calculateMacros } from '../services/macroCalculator'
+import { getEffectiveProfile } from '../services/weightLog'
 import { getTotalsForDay } from '../services/nutritionLog'
 import { isSameDay } from '../utils/date'
 import { resizeImageForUpload } from '../utils/image'
@@ -29,10 +33,12 @@ type ChatScreenProps = {
   initialMessages?: ChatMessage[]
   initialNutritionLog?: NutritionLogEntry[]
   initialWeightLog?: WeightLogEntry[]
+  initialBandejaoUser?: boolean | null
   onStateChange?: (
     messages: ChatMessage[],
     nutritionLog: NutritionLogEntry[],
     weightLog: WeightLogEntry[],
+    bandejaoUser: boolean | null,
   ) => void
 }
 
@@ -106,6 +112,7 @@ function ChatScreen({
   initialMessages,
   initialNutritionLog,
   initialWeightLog,
+  initialBandejaoUser,
   onStateChange,
 }: ChatScreenProps) {
   const coach = COACHES.find((option) => option.value === coachId)!
@@ -123,21 +130,38 @@ function ChatScreen({
   const [weightLog, setWeightLog] = useState<WeightLogEntry[]>(
     initialWeightLog ?? [],
   )
+  const [bandejaoUser, setBandejaoUser] = useState<boolean | null>(
+    initialBandejaoUser ?? null,
+  )
+  const [bandejaoMenu, setBandejaoMenu] = useState<BandejaoMenu | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const hasKickedOffRef = useRef((initialMessages?.length ?? 0) > 0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const lastAttemptRef = useRef<ChatMessage[] | null>(null)
+  // Anchor for the weigh-in reminder when no weigh-in has ever been logged:
+  // the first message's timestamp approximates when this profile started,
+  // without needing a dedicated onboarding-completion field.
+  const conversationStartedAtRef = useRef(
+    initialMessages?.[0]?.timestamp ?? Date.now(),
+  )
 
-  const calories = calculateDailyCalories(profile)
-  const macros = calculateMacros(profile, calories)
+  const effectiveProfile = getEffectiveProfile(profile, weightLog)
+  const calories = calculateDailyCalories(effectiveProfile)
+  const macros = calculateMacros(effectiveProfile, calories)
   const todayTotals = getTotalsForDay(nutritionLog)
 
   useEffect(() => {
-    onStateChange?.(messages, nutritionLog, weightLog)
+    onStateChange?.(messages, nutritionLog, weightLog, bandejaoUser)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, nutritionLog, weightLog])
+  }, [messages, nutritionLog, weightLog, bandejaoUser])
+
+  useEffect(() => {
+    if (bandejaoUser === true) {
+      fetchTodaysBandejaoMenu().then(setBandejaoMenu)
+    }
+  }, [bandejaoUser])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: 'end' })
@@ -159,11 +183,19 @@ function ChatScreen({
           language,
           nutritionLog,
           weightLog,
+          bandejaoUser,
+          bandejaoMenu,
+          conversationStartedAt: conversationStartedAtRef.current,
         }),
       })
 
+      const { cleanedReply: replyAfterBandejaoUser, bandejaoUser: newBandejaoUser } =
+        extractBandejaoUser(reply)
+      if (newBandejaoUser !== null) {
+        setBandejaoUser(newBandejaoUser)
+      }
       const { cleanedReply: replyAfterNutrition, entry } =
-        extractNutritionData(reply)
+        extractNutritionData(replyAfterBandejaoUser)
       const { cleanedReply: replyAfterWeight, entry: weightEntry } =
         extractWeightData(replyAfterNutrition)
       const {
@@ -196,11 +228,14 @@ function ChatScreen({
         })
       }
 
+      let newWeightEntry: WeightLogEntry | null = null
       if (weightEntry) {
-        setWeightLog((current) => [
-          ...current,
-          { id: crypto.randomUUID(), timestamp: Date.now(), ...weightEntry },
-        ])
+        newWeightEntry = {
+          id: crypto.randomUUID(),
+          timestamp: Date.now(),
+          ...weightEntry,
+        }
+        setWeightLog((current) => [...current, newWeightEntry!])
       }
 
       const parts = cleanedReply
@@ -223,6 +258,33 @@ function ChatScreen({
         if (useTypingDelay && index < parts.length - 1) {
           await new Promise((resolve) => setTimeout(resolve, 600))
         }
+      }
+
+      // Never let the target change happen silently in the background —
+      // tell the user with the app's own computed numbers (ground truth),
+      // not the model's prose, the same principle used everywhere else in
+      // this file (NUTRITION_DATA, corrections, etc.).
+      if (newWeightEntry) {
+        const updatedProfile = getEffectiveProfile(profile, [
+          ...weightLog,
+          newWeightEntry,
+        ])
+        const updatedCalories = calculateDailyCalories(updatedProfile)
+        const updatedMacros = calculateMacros(updatedProfile, updatedCalories)
+
+        setMessages((current) => [
+          ...current,
+          {
+            id: crypto.randomUUID(),
+            role: 'coach',
+            type: 'text',
+            content:
+              language === 'pt'
+                ? `Novo peso registrado — recalculando suas metas com base nele:\n\nCalorias: ${updatedCalories} kcal\nProteína: ${updatedMacros.proteinGrams}g · Carboidratos: ${updatedMacros.carbsGrams}g · Gordura: ${updatedMacros.fatGrams}g\nÁgua: ${(updatedMacros.waterMl / 1000).toFixed(1)}L`
+                : `New weight logged — recalculating your targets from it:\n\nCalories: ${updatedCalories} kcal\nProtein: ${updatedMacros.proteinGrams}g · Carbs: ${updatedMacros.carbsGrams}g · Fat: ${updatedMacros.fatGrams}g\nWater: ${(updatedMacros.waterMl / 1000).toFixed(1)}L`,
+            timestamp: Date.now(),
+          },
+        ])
       }
     } catch (error) {
       console.error('Chat request failed', error)

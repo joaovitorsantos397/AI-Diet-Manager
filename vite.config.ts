@@ -7,6 +7,10 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': 'http://localhost:3001',
+      '/bandejao': {
+        target: 'http://localhost:3002',
+        rewrite: (path) => path.replace(/^\/bandejao/, ''),
+      },
     },
   },
 })

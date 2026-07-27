@@ -53,6 +53,7 @@ function App() {
           messages: initialSession.messages,
           nutritionLog: initialSession.nutritionLog,
           weightLog: initialSession.weightLog,
+          bandejaoUser: initialSession.bandejaoUser,
         }
       : null,
   )
@@ -156,13 +157,15 @@ function App() {
         initialMessages={loadedProfile.messages}
         initialNutritionLog={loadedProfile.nutritionLog}
         initialWeightLog={loadedProfile.weightLog}
-        onStateChange={(messages, nutritionLog, weightLog) => {
+        initialBandejaoUser={loadedProfile.bandejaoUser}
+        onStateChange={(messages, nutritionLog, weightLog, bandejaoUser) => {
           if (import.meta.env.DEV) {
             saveProfile({
               ...loadedProfile,
               messages,
               nutritionLog,
               weightLog,
+              bandejaoUser,
             })
           } else {
             saveSession({
@@ -172,6 +175,7 @@ function App() {
               messages,
               nutritionLog,
               weightLog,
+              bandejaoUser,
             })
           }
         }}
@@ -323,7 +327,7 @@ function App() {
       language={language}
       coachId={coach}
       profile={profile}
-      onStateChange={(messages, nutritionLog, weightLog) => {
+      onStateChange={(messages, nutritionLog, weightLog, bandejaoUser) => {
         if (import.meta.env.DEV) {
           if (isCreatingProfile) {
             saveProfile({
@@ -335,6 +339,7 @@ function App() {
               messages,
               nutritionLog,
               weightLog,
+              bandejaoUser,
             })
           }
         } else {
@@ -345,6 +350,7 @@ function App() {
             messages,
             nutritionLog,
             weightLog,
+            bandejaoUser,
           })
         }
       }}

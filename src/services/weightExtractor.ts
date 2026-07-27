@@ -2,7 +2,11 @@ const WEIGHT_DATA_PATTERN = /WEIGHT_DATA:\s*(\{[^\n]*\})/
 
 type WeightExtractionResult = {
   cleanedReply: string
-  entry: { weightKg: number; bodyFatPercentage: number | null } | null
+  entry: {
+    weightKg: number
+    bodyFatPercentage: number | null
+    basalMetabolicRate: number | null
+  } | null
 }
 
 export function extractWeightData(reply: string): WeightExtractionResult {
@@ -24,7 +28,14 @@ export function extractWeightData(reply: string): WeightExtractionResult {
       parsed.bodyFatPercentage === null || parsed.bodyFatPercentage === undefined
         ? null
         : Number(parsed.bodyFatPercentage)
-    return { cleanedReply, entry: { weightKg, bodyFatPercentage } }
+    const basalMetabolicRate =
+      parsed.basalMetabolicRate === null || parsed.basalMetabolicRate === undefined
+        ? null
+        : Number(parsed.basalMetabolicRate)
+    return {
+      cleanedReply,
+      entry: { weightKg, bodyFatPercentage, basalMetabolicRate },
+    }
   } catch {
     return { cleanedReply, entry: null }
   }

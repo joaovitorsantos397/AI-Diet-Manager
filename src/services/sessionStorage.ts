@@ -14,6 +14,7 @@ export type StoredSession = {
   messages: ChatMessage[]
   nutritionLog: NutritionLogEntry[]
   weightLog: WeightLogEntry[]
+  bandejaoUser: boolean | null
 }
 
 export function getSession(): StoredSession | null {

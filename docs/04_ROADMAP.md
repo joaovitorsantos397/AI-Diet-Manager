@@ -114,6 +114,28 @@ Groundwork completed before the versioned feature work begins.
 
 ---
 
+# Version 1.1 — Weight-Aware Targets & Bandejão Integration
+
+- [x] Bandejão/RU (Unicamp) menu integration — the coach asks once
+      whether the user eats at Unicamp's bandejão and, if so, fetches
+      today's official cardápio from the sibling Bandejao Tracker
+      project (via a Vite dev proxy) to ground meal estimates in the
+      actual dishes on offer that day, including vegan alternatives
+- [x] Weight-based dynamic target recalculation — calorie/protein/
+      carb/fat/water targets now track the most recently logged
+      weigh-in (and, when reported, a refreshed measured BMR) instead
+      of staying pinned to the value captured once at onboarding
+- [x] Proactive weigh-in reminder — the coach now tracks days since
+      the last logged weigh-in and brings it up itself once that
+      reaches 14 days, instead of a vague "mention it occasionally"
+      instruction with no signal behind it
+- [x] Transparent recalculation notice — logging a new weight now
+      posts an app-computed (not model-guessed) chat message stating
+      the updated targets immediately, so the numbers never just
+      silently shift underneath the user
+
+---
+
 # Future Ideas (post-1.0)
 
 - [ ] Video-based meal logging
@@ -203,11 +225,16 @@ button had no `:disabled` styling (no visual feedback while sending or
 reviewing a recorded audio), and the "disabled" opacity value was
 inconsistent between components (0.4 vs 0.5), now standardized.
 
-Version 1.0 is complete.
+Version 1.0 is complete, and its work has since been committed and
+pushed to GitHub.
+
+Version 1.1 is complete too: the coach now integrates with the
+sibling Bandejao Tracker project for Unicamp bandejão users, and
+calorie/macro targets recalculate dynamically from the user's most
+recently logged weight (with a 14-day proactive reminder and a
+transparent, app-computed chat notice whenever targets change) instead
+of staying pinned to the onboarding snapshot.
 
 Current focus:
 
-➡️ Nothing committed yet — all of this work (everything past the
-initial theme-system commit) is still uncommitted locally. Next
-concrete step is deciding what to pick from Future Ideas (post-1.0),
-or committing/shipping what exists so far.
+➡️ Deciding what to pick from Future Ideas (post-1.0) next.

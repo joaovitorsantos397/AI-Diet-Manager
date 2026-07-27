@@ -3,13 +3,14 @@ import type { Language } from '../types/language'
 import type { UserProfile } from '../types/userProfile'
 import type { NutritionLogEntry } from '../types/nutritionLogEntry'
 import type { WeightLogEntry } from '../types/weightLogEntry'
+import type { BandejaoMenu, BandejaoMealSection } from '../types/bandejaoMenu'
 import {
   calculateDailyCalories,
   getDietStyle,
 } from './calorieCalculator'
 import { calculateMacros } from './macroCalculator'
 import { getAdherenceStreakDays, getTotalsForDay } from './nutritionLog'
-import { getLatestWeightEntry } from './weightLog'
+import { getEffectiveProfile, getLatestWeightEntry } from './weightLog'
 import { isSameDay } from '../utils/date'
 
 const COACH_PERSONAS: Record<CoachId, string> = {
@@ -30,6 +31,28 @@ type BuildSystemInstructionParams = {
   language: Language
   nutritionLog: NutritionLogEntry[]
   weightLog: WeightLogEntry[]
+  bandejaoUser: boolean | null
+  bandejaoMenu: BandejaoMenu | null
+  conversationStartedAt: number
+}
+
+function formatBandejaoSection(section: BandejaoMealSection): string {
+  if (!section.available) {
+    return 'não servido hoje'
+  }
+  const items = [section.dish, ...section.items].join(', ')
+  return items
+}
+
+function formatBandejaoMenuText(menu: BandejaoMenu | null): string | null {
+  if (!menu) {
+    return null
+  }
+  const lunch = formatBandejaoSection(menu.lunch)
+  const lunchVegan = formatBandejaoSection(menu.lunchVegan)
+  const dinner = formatBandejaoSection(menu.dinner)
+  const dinnerVegan = formatBandejaoSection(menu.dinnerVegan)
+  return `Almoço: ${lunch}. Almoço vegano: ${lunchVegan}. Jantar: ${dinner}. Jantar vegano: ${dinnerVegan}.`
 }
 
 export function buildSystemInstruction({
@@ -38,9 +61,10 @@ export function buildSystemInstruction({
   language,
   nutritionLog,
   weightLog,
+  bandejaoUser,
+  bandejaoMenu,
+  conversationStartedAt,
 }: BuildSystemInstructionParams): string {
-  const calories = calculateDailyCalories(profile)
-  const macros = calculateMacros(profile, calories)
   const dietStyle = getDietStyle(profile.goal)
   const languageName = language === 'pt' ? 'Portuguese' : 'English'
   const hormoneUseText =
@@ -50,12 +74,6 @@ export function buildSystemInstruction({
         ? 'no'
         : 'not disclosed'
 
-  const todayTotals = getTotalsForDay(nutritionLog)
-  const streakDays = getAdherenceStreakDays(
-    nutritionLog,
-    calories,
-    macros.proteinGrams,
-  )
   const latestWeightEntry = getLatestWeightEntry(weightLog)
   const latestWeight = latestWeightEntry?.weightKg ?? profile.weight
   const weightDeltaKg = latestWeightEntry
@@ -64,7 +82,26 @@ export function buildSystemInstruction({
   const expectedWeightTrend =
     profile.goal === 'lose' ? 'down' : profile.goal === 'maintain' ? 'flat' : 'up'
 
+  // Targets track the user's current weight (latest logged weigh-in), not
+  // the one from onboarding — otherwise they silently go stale as the
+  // user's weight changes over the course of a cycle/diet.
+  const effectiveProfile = getEffectiveProfile(profile, weightLog)
+  const calories = calculateDailyCalories(effectiveProfile)
+  const macros = calculateMacros(effectiveProfile, calories)
+
+  const todayTotals = getTotalsForDay(nutritionLog)
+  const streakDays = getAdherenceStreakDays(
+    nutritionLog,
+    calories,
+    macros.proteinGrams,
+  )
+
   const now = new Date()
+  const lastWeighInTimestamp = latestWeightEntry?.timestamp ?? conversationStartedAt
+  const daysSinceLastWeighIn = Math.floor(
+    (now.getTime() - lastWeighInTimestamp) / (1000 * 60 * 60 * 24),
+  )
+  const shouldPromptWeighIn = daysSinceLastWeighIn >= 14
   const currentDateTimeText = new Intl.DateTimeFormat(
     language === 'pt' ? 'pt-BR' : 'en-US',
     {
@@ -85,6 +122,9 @@ export function buildSystemInstruction({
     )
     .join('; ')
 
+  const bandejaoMenuText =
+    bandejaoUser === true ? formatBandejaoMenuText(bandejaoMenu) : null
+
   return `
 You are a nutrition coach inside the AI Diet Manager app.
 
@@ -104,8 +144,8 @@ against a message's own [HH:MM] tag, not a vague sense of "recent".
 
 User's daily targets:
 - Calories: ${calories} kcal${
-    profile.basalMetabolicRate !== null
-      ? ` (based on their measured basal metabolic rate of ${profile.basalMetabolicRate} kcal, e.g. from a bioimpedance scale — more accurate than a formula estimate)`
+    effectiveProfile.basalMetabolicRate !== null
+      ? ` (based on their measured basal metabolic rate of ${effectiveProfile.basalMetabolicRate} kcal, e.g. from a bioimpedance scale — more accurate than a formula estimate)`
       : ''
   }
 - Protein: ${macros.proteinGrams}g, Carbs: ${macros.carbsGrams}g, Fat: ${macros.fatGrams}g (saturated fat under ${macros.saturatedFatCapGrams}g), Fiber: ${macros.fiberGrams}g
@@ -146,7 +186,30 @@ a long chat is more error-prone than the app's):
   time — if logged weigh-ins move the other way for a while, that's
   worth naming plainly (adjusting the plan, or asking about
   adherence/hormone factors) rather than staying quiet about it.
-
+${
+  bandejaoUser === null
+    ? `
+Bandejão/RU check (ask exactly once): you don't yet know whether this
+user studies at Unicamp and regularly eats at the bandejão (RU). Early
+in the conversation — the kickoff or shortly after, whichever fits
+naturally — ask them. Once they give a clear yes/no answer, add a line
+BANDEJAO_USER:yes or BANDEJAO_USER:no (own line, exactly this format)
+so the app remembers the answer and never asks again. Omit this line
+on every other message, including this one if they haven't answered
+yet.
+`
+    : bandejaoMenuText
+      ? `
+Today's RU (bandejão) menu, from Unicamp's own official cardápio for
+today (ground truth, not a guess): ${bandejaoMenuText} If the user says
+they're eating or ate at the bandejão/RU, use these known dishes to
+estimate their meal instead of guessing generically — ask which items
+from today's menu they took and roughly how much, the same way you'd
+handle any meal without a photo. Never assume they took every item
+listed; it's a menu of what's offered, not what they ate.
+`
+      : ''
+}
 Rules (never break these regardless of personality):
 - Be informational, never give a medical diagnosis. If something needs clinical monitoring (e.g. hematocrit, cholesterol), recommend bloodwork and a doctor instead of asserting a fix.
 - The app depends entirely on the user's honesty — logged meals, pantry, hormone use. State that dependency plainly when relevant, don't assume it silently.
@@ -321,6 +384,18 @@ entry's exact mealTime from the list above so the right one gets
 removed. Combine with a new NUTRITION_DATA line the same way if they
 give you corrected numbers.
 
+Adding a missed item is NOT a correction: if the user says something
+was simply never logged at all (e.g. "os ovos que eu comi não foram
+contabilizados, registra agora" / "esqueci de registrar o suco de
+ontem à tarde") — as opposed to saying an existing entry's numbers are
+wrong — do NOT emit any CORRECTION line. Just log the missed item the
+normal way: a fresh NUTRITION_DATA line for that item alone, exactly
+like any other new food. Emitting CORRECTION:remove_last here would
+delete a different, correctly-logged entry that has nothing to do with
+the item the user is adding, silently corrupting the day's total.
+CORRECTION is only for "this number is wrong, replace it" — never for
+"this thing was missing, add it."
+
 Weigh-in cadence: from time to time, suggest the user re-measure at a
 pharmacy (common and often free/cheap where they live) rather than
 requiring a home scale. Body weight alone is worth checking often if
@@ -332,17 +407,37 @@ if it's free or cheap for them. Explicitly adapt to what they tell you
 about cost/access rather than assuming everyone can do this often.
 Mention this lightly and occasionally, not as a recurring nag — never
 make the user feel bad for going longer between weigh-ins.
+${
+  shouldPromptWeighIn
+    ? `It's been ${daysSinceLastWeighIn} days since the user's last logged
+weigh-in (or since this conversation started, if none has ever been
+logged) — noticeably past the ~weekly cadence above. Their
+calorie/protein/water targets are computed from that last known
+weight, so they're likely drifting out of date. Proactively bring this
+up yourself somewhere in this reply — don't wait for them to ask —
+and ask for a quick current weight (and a bioimpedance/body-fat
+reading too if it's been closer to a month or they have easy access)
+so the targets can be refreshed. Keep the tone consistent with the
+"lightly, no nagging" rule above; if you already raised this earlier
+in the conversation and they haven't answered yet, a brief one-line
+reminder is enough rather than repeating the full ask.`
+    : ''
+}
 
 Weight logging data: whenever the user reports a new weigh-in or
 bioimpedance result (a number, or a photo of the scale's screen), add
-a line WEIGHT_DATA:{"weightKg":NUMBER,"bodyFatPercentage":NUMBER_OR_NULL}
+a line
+WEIGHT_DATA:{"weightKg":NUMBER,"bodyFatPercentage":NUMBER_OR_NULL,"basalMetabolicRate":NUMBER_OR_NULL}
 — bodyFatPercentage is null if they only gave you weight, no body fat
-reading. Valid JSON, no extra text on that line, no markdown formatting
-around it. Sanity-check against the last known weight above: a normal
-update is a small change (a couple kg at most over weeks), never a
-wild jump — if the number looks implausible, ask them to confirm it
-rather than logging it blindly. Omit this line for anything that isn't
-a new measurement (questions about past weight, discussing the trend,
-etc.).
+reading. basalMetabolicRate is null unless the bioimpedance result
+itself reports a measured BMR/metabolic rate figure (some scales show
+one directly) — never estimate or compute this yourself, only pass
+through a number the device/reading actually displayed. Valid JSON, no
+extra text on that line, no markdown formatting around it. Sanity-check
+against the last known weight above: a normal update is a small change
+(a couple kg at most over weeks), never a wild jump — if the number
+looks implausible, ask them to confirm it rather than logging it
+blindly. Omit this line for anything that isn't a new measurement
+(questions about past weight, discussing the trend, etc.).
 `.trim()
 }
