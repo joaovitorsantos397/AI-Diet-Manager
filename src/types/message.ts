@@ -9,6 +9,11 @@ export type ChatMessage =
       timestamp: number
       feedbackLevel?: FeedbackLevel
       isError?: boolean
+      // App-generated notices (e.g. the recalculated-targets messages, or
+      // the no-text fallback) — never sent back to the model as history,
+      // so it doesn't start pattern-matching its own "voice" against
+      // text it never actually wrote.
+      isSynthetic?: boolean
     }
   | {
       id: string

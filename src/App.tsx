@@ -54,6 +54,7 @@ function App() {
           nutritionLog: initialSession.nutritionLog,
           weightLog: initialSession.weightLog,
           bandejaoUser: initialSession.bandejaoUser,
+          goalOverride: initialSession.goalOverride,
         }
       : null,
   )
@@ -158,7 +159,14 @@ function App() {
         initialNutritionLog={loadedProfile.nutritionLog}
         initialWeightLog={loadedProfile.weightLog}
         initialBandejaoUser={loadedProfile.bandejaoUser}
-        onStateChange={(messages, nutritionLog, weightLog, bandejaoUser) => {
+        initialGoalOverride={loadedProfile.goalOverride}
+        onStateChange={(
+          messages,
+          nutritionLog,
+          weightLog,
+          bandejaoUser,
+          goalOverride,
+        ) => {
           if (import.meta.env.DEV) {
             saveProfile({
               ...loadedProfile,
@@ -166,6 +174,7 @@ function App() {
               nutritionLog,
               weightLog,
               bandejaoUser,
+              goalOverride,
             })
           } else {
             saveSession({
@@ -176,6 +185,7 @@ function App() {
               nutritionLog,
               weightLog,
               bandejaoUser,
+              goalOverride,
             })
           }
         }}
@@ -327,7 +337,13 @@ function App() {
       language={language}
       coachId={coach}
       profile={profile}
-      onStateChange={(messages, nutritionLog, weightLog, bandejaoUser) => {
+      onStateChange={(
+        messages,
+        nutritionLog,
+        weightLog,
+        bandejaoUser,
+        goalOverride,
+      ) => {
         if (import.meta.env.DEV) {
           if (isCreatingProfile) {
             saveProfile({
@@ -340,6 +356,7 @@ function App() {
               nutritionLog,
               weightLog,
               bandejaoUser,
+              goalOverride,
             })
           }
         } else {
@@ -351,6 +368,7 @@ function App() {
             nutritionLog,
             weightLog,
             bandejaoUser,
+            goalOverride,
           })
         }
       }}

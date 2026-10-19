@@ -5,6 +5,16 @@ type SendChatMessageParams = {
   systemInstruction: string
 }
 
+export type ChatFunctionCall = {
+  name: string
+  args?: Record<string, unknown>
+}
+
+export type ChatResponse = {
+  text: string
+  functionCalls: ChatFunctionCall[]
+}
+
 function formatClockTime(timestamp: number): string {
   const date = new Date(timestamp)
   const hours = String(date.getHours()).padStart(2, '0')
@@ -28,8 +38,15 @@ function messageToParts(message: ChatMessage) {
 export async function sendChatMessage({
   messages,
   systemInstruction,
-}: SendChatMessageParams): Promise<string> {
-  const contents = messages.map((message) => ({
+}: SendChatMessageParams): Promise<ChatResponse> {
+  // Synthetic, app-generated bubbles (a no-text fallback, a recalculated-
+  // targets notice) never actually came from the model — sending them
+  // back as its own past turns would let it pattern-match its future
+  // replies against text it never wrote, which is exactly backwards.
+  const historyMessages = messages.filter(
+    (message) => !(message.type === 'text' && message.isSynthetic),
+  )
+  const contents = historyMessages.map((message) => ({
     role: message.role === 'user' ? 'user' : 'model',
     parts: messageToParts(message),
   }))
@@ -44,6 +61,6 @@ export async function sendChatMessage({
     throw new Error('AI request failed')
   }
 
-  const data: { reply: string } = await response.json()
-  return data.reply
+  const data: ChatResponse = await response.json()
+  return { text: data.text ?? '', functionCalls: data.functionCalls ?? [] }
 }

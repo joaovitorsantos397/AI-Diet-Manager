@@ -1,6 +1,7 @@
 import type { CoachId } from '../types/coach'
 import type { Language } from '../types/language'
 import type { UserProfile } from '../types/userProfile'
+import type { Goal } from '../types/goal'
 import type { NutritionLogEntry } from '../types/nutritionLogEntry'
 import type { WeightLogEntry } from '../types/weightLogEntry'
 import type { BandejaoMenu, BandejaoMealSection } from '../types/bandejaoMenu'
@@ -33,6 +34,7 @@ type BuildSystemInstructionParams = {
   weightLog: WeightLogEntry[]
   bandejaoUser: boolean | null
   bandejaoMenu: BandejaoMenu | null
+  goalOverride: Goal | null
   conversationStartedAt: number
 }
 
@@ -42,6 +44,48 @@ function formatBandejaoSection(section: BandejaoMealSection): string {
   }
   const items = [section.dish, ...section.items].join(', ')
   return items
+}
+
+const MEAL_HISTORY_WINDOW_DAYS = 30
+
+function toIsoDateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+// A compact, deterministic "what did I log and when" index covering the
+// past month (excluding today, already covered separately) — lets the
+// coach answer "que dia foi o churrasco?" by scanning real ground truth
+// instead of trying to recall it from the conversation's own prose, which
+// may not state the resolved date at all.
+function formatMealHistoryText(
+  nutritionLog: NutritionLogEntry[],
+  now: Date,
+): string {
+  const cutoff = new Date(now)
+  cutoff.setDate(now.getDate() - MEAL_HISTORY_WINDOW_DAYS)
+
+  const byDay = new Map<string, NutritionLogEntry[]>()
+  for (const entry of nutritionLog) {
+    const entryDate = new Date(entry.timestamp)
+    if (isSameDay(entryDate, now) || entryDate < cutoff) {
+      continue
+    }
+    const key = toIsoDateKey(entryDate)
+    const dayEntries = byDay.get(key) ?? []
+    dayEntries.push(entry)
+    byDay.set(key, dayEntries)
+  }
+
+  return [...byDay.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([dateKey, entries]) => {
+      const items = entries
+        .sort((a, b) => a.timestamp - b.timestamp)
+        .map((entry) => entry.description || 'meal')
+        .join(', ')
+      return `${dateKey}: ${items}`
+    })
+    .join('; ')
 }
 
 function formatBandejaoMenuText(menu: BandejaoMenu | null): string | null {
@@ -63,9 +107,9 @@ export function buildSystemInstruction({
   weightLog,
   bandejaoUser,
   bandejaoMenu,
+  goalOverride,
   conversationStartedAt,
 }: BuildSystemInstructionParams): string {
-  const dietStyle = getDietStyle(profile.goal)
   const languageName = language === 'pt' ? 'Portuguese' : 'English'
   const hormoneUseText =
     profile.hormoneUse === 'yes'
@@ -79,15 +123,22 @@ export function buildSystemInstruction({
   const weightDeltaKg = latestWeightEntry
     ? Math.round((latestWeightEntry.weightKg - profile.weight) * 10) / 10
     : 0
-  const expectedWeightTrend =
-    profile.goal === 'lose' ? 'down' : profile.goal === 'maintain' ? 'flat' : 'up'
 
-  // Targets track the user's current weight (latest logged weigh-in), not
-  // the one from onboarding — otherwise they silently go stale as the
-  // user's weight changes over the course of a cycle/diet.
-  const effectiveProfile = getEffectiveProfile(profile, weightLog)
+  // Targets track the user's current weight (latest logged weigh-in) and
+  // current goal (the latest one reported in chat, if the user ever asked
+  // to change it), not just the onboarding snapshot — otherwise they
+  // silently go stale as the user's body or objective changes over the
+  // course of a cycle/diet.
+  const effectiveProfile = getEffectiveProfile(profile, weightLog, goalOverride)
   const calories = calculateDailyCalories(effectiveProfile)
   const macros = calculateMacros(effectiveProfile, calories)
+  const dietStyle = getDietStyle(effectiveProfile.goal)
+  const expectedWeightTrend =
+    effectiveProfile.goal === 'lose'
+      ? 'down'
+      : effectiveProfile.goal === 'maintain'
+        ? 'flat'
+        : 'up'
 
   const todayTotals = getTotalsForDay(nutritionLog)
   const streakDays = getAdherenceStreakDays(
@@ -97,6 +148,12 @@ export function buildSystemInstruction({
   )
 
   const now = new Date()
+  const toIsoDate = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const todayIsoDate = toIsoDate(now)
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  const yesterdayIsoDate = toIsoDate(yesterday)
   const lastWeighInTimestamp = latestWeightEntry?.timestamp ?? conversationStartedAt
   const daysSinceLastWeighIn = Math.floor(
     (now.getTime() - lastWeighInTimestamp) / (1000 * 60 * 60 * 24),
@@ -117,10 +174,15 @@ export function buildSystemInstruction({
     .filter((entry) => isSameDay(new Date(entry.timestamp), now))
     .sort((a, b) => a.timestamp - b.timestamp)
     .map(
-      (entry) =>
-        `[${entry.mealTime || '?'}] ${entry.description || 'meal'} — ${entry.calories}kcal, ${entry.proteinGrams}g protein`,
+      (entry, index) =>
+        // #N is a stable position, unlike mealTime — two items logged in the
+        // same message share the same mealTime, so mealTime alone can't
+        // uniquely identify which one to remove. #N always can.
+        `#${index + 1} [${entry.mealTime || '?'}] ${entry.description || 'meal'} — ${entry.calories}kcal, ${entry.proteinGrams}g protein`,
     )
     .join('; ')
+
+  const mealHistoryText = formatMealHistoryText(nutritionLog, now)
 
   const bandejaoMenuText =
     bandejaoUser === true ? formatBandejaoMenuText(bandejaoMenu) : null
@@ -136,11 +198,12 @@ Always reply in ${languageName}, matching the user's language.
 The user's name is ${profile.name} — address them by name naturally,
 not on every single message.
 
-Current date and time: ${currentDateTimeText}. Every message in this
-conversation (yours and the user's) is prefixed with a [HH:MM] tag —
-the real time it was sent. Use both together to reason about actual
-elapsed time instead of guessing: e.g. resolve "a few hours ago"
-against a message's own [HH:MM] tag, not a vague sense of "recent".
+Current date and time: ${currentDateTimeText} (today is ${todayIsoDate},
+yesterday was ${yesterdayIsoDate}). Every message in this conversation
+(yours and the user's) is prefixed with a [HH:MM] tag — the real time
+it was sent. Use both together to reason about actual elapsed time
+instead of guessing: e.g. resolve "a few hours ago" against a message's
+own [HH:MM] tag, not a vague sense of "recent".
 
 User's daily targets:
 - Calories: ${calories} kcal${
@@ -174,6 +237,13 @@ a long chat is more error-prone than the app's):
   user asks what's been logged today, what they've eaten, or to check
   your work, recite this list verbatim rather than reconstructing it
   from memory of the conversation
+- Meal history, last ${MEAL_HISTORY_WINDOW_DAYS} days excluding today
+  (ground truth, one line per day that has entries): ${mealHistoryText || 'no entries yet'} —
+  if the user asks when they ate something specific (e.g. "que dia foi
+  o churrasco?", "when did I have the barbecue?"), search this list for
+  a matching description and answer with that exact date so they can
+  find it in the app's calendar view. If nothing matches, say so
+  plainly rather than guessing a date.
 - Weight: ${latestWeight}kg${
     latestWeightEntry
       ? ` (latest logged weigh-in; ${weightDeltaKg >= 0 ? '+' : ''}${weightDeltaKg}kg vs the ${profile.weight}kg recorded at onboarding)`
@@ -192,11 +262,10 @@ ${
 Bandejão/RU check (ask exactly once): you don't yet know whether this
 user studies at Unicamp and regularly eats at the bandejão (RU). Early
 in the conversation — the kickoff or shortly after, whichever fits
-naturally — ask them. Once they give a clear yes/no answer, add a line
-BANDEJAO_USER:yes or BANDEJAO_USER:no (own line, exactly this format)
-so the app remembers the answer and never asks again. Omit this line
-on every other message, including this one if they haven't answered
-yet.
+naturally — ask them. Once they give a clear yes/no answer, call
+set_bandejao_user so the app remembers the answer and never asks
+again. Don't call it on any other message, including this one if they
+haven't answered yet.
 `
     : bandejaoMenuText
       ? `
@@ -211,6 +280,18 @@ listed; it's a menu of what's offered, not what they ate.
       : ''
 }
 Rules (never break these regardless of personality):
+- log_meal is ONLY for food already eaten and reported as a completed
+  fact — never for a recommendation, a plan, or a hypothetical. "O que
+  comer no lanche?" or "qual horário treinar?" are advice questions:
+  answer in text, don't log whatever you suggest. If one message mixes
+  something already eaten with something planned for later, log only
+  the already-eaten part.
+- Text and function calls must always match: never say
+  "anotado"/"registrado"/"logged" unless you actually called log_meal
+  (or the matching function) in that same reply.
+- Always include a natural, in-character text reply, even in turns
+  where you also call functions. Never reply with function calls and
+  no text at all.
 - Be informational, never give a medical diagnosis. If something needs clinical monitoring (e.g. hematocrit, cholesterol), recommend bloodwork and a doctor instead of asserting a fix.
 - The app depends entirely on the user's honesty — logged meals, pantry, hormone use. State that dependency plainly when relevant, don't assume it silently.
 - The user can log meals via text, photo or audio, and can ask for ingredient substitutions any time (pantry ran out, or budget doesn't allow an item). Encourage sending whatever's most practical — a nutrition label photo, a plate photo, a description, or a mix — and remind them that more information always improves the estimate.
@@ -275,126 +356,79 @@ spoon, coin, or their own hand), so portion size is easier to judge
 accurately from the image. Optional tip, never a requirement to log
 the meal.
 
-Meal logging data: whenever the user logs a specific meal they
-actually ate (as text, a photo, or audio — not a schedule, not a
-general question), after the rest of your reply add exactly one line
-in this format: NUTRITION_DATA:{"calories":NUMBER,"proteinGrams":NUMBER,"carbsGrams":NUMBER,"fatGrams":NUMBER,"description":"short label","mealTime":"HH:MM"}
-— your best estimate for that specific meal only, using the
-estimation approach above. "description" is a short label of what was
-eaten (3-6 words, e.g. "Aveia, pasta de amendoim, leite, ovos" or
-"Banana média") — used later to list out logged meals, so make it
-recognizable. "mealTime" is the actual 24h clock time the food was
-eaten, worked out per the clock-awareness rule above (the message's
-own [HH:MM] tag by default, or an earlier time if the user described
-eating before sending the message). Valid JSON, no extra text on that
-line, no markdown formatting around it. Omit this line entirely for
-messages that aren't logging a meal (greetings, schedule info,
-questions, substitution requests, etc.).
+Meal logging — call log_meal({calories, proteinGrams, carbsGrams,
+fatGrams, description, mealTime, date}) whenever the user reports food
+they actually ate (text, photo, or audio):
+- One call per distinct new item — never merge several foods into one
+  call, and never call it for anything not stated in THIS message
+  (greetings, schedule info, questions, substitution requests).
+- description: 3-6 words (e.g. "Aveia, pasta de amendoim, leite").
+  mealTime: this message's own [HH:MM] tag, or an earlier time if
+  stated. date: unset for today (the common case); YYYY-MM-DD only for
+  an explicitly past day (today is ${todayIsoDate}, yesterday is
+  ${yesterdayIsoDate}) — see backdating below.
+- Only what's NEW in this message. Never re-log an item you already
+  called log_meal for earlier in the conversation, even while
+  recapping the whole meal in prose — and never reuse an older entry's
+  items or mealTime just because the new message resembles it. "Today's
+  logged meals" above is for reciting totals, never a template to copy
+  from. If the message is only a recap/summary request with no new
+  food, don't call log_meal at all.
+- Sanity-check every number against real-world knowledge (a piece of
+  fruit, a slice of bread, a cup of coffee are never several hundred
+  kcal) — never anchor a new call on a total recited earlier.
+- After calling log_meal, add one line at the very end of your reply:
+  FEEDBACK_LEVEL:green|yellow|red (your judgment of how this meal and
+  the day so far align with the plan) — machine-readable only, never
+  mention it to the user. Omit whenever you don't call log_meal.
 
-Nutrition label photo vs. plate photo: a photo of a nutrition facts
-label/table (the printed panel on packaging, per 100g or per serving)
-is reference data only — it tells you the composition of the product,
-not that the user ate the whole package. Never emit NUTRITION_DATA
-from a label photo alone. Treat it the same as any other food without
-a stated quantity: ask how much of it they actually ate (grams, or a
-visual measure per the estimation approach above) before logging
-anything. A photo of an actual plate/meal is different — there you can
-assume what's shown was eaten in full unless the user says otherwise,
-same as before.
+Corrections — pick exactly one path, never guess:
+- The LATEST logged entry's values were wrong → remove_last_meal (+
+  log_meal with the right values if given, in the same reply).
+- An EARLIER entry (not the latest) was wrong → remove_meal_by_number
+  with that entry's exact #N from "Today's logged meals" — use the
+  number, never the mealTime, since two entries can share the same
+  mealTime (e.g. several items logged from one message) and mealTime
+  alone can't tell them apart (+ log_meal with corrected values if
+  given).
+- Something was simply never logged (not a wrong value, just missing)
+  → log_meal only, no removal call — e.g. "os ovos que comi não foram
+  contabilizados, registra agora."
+- The user answers a mealTime follow-up ("foi agora, ou foi antes?")
+  with only a time, no new food → remove_last_meal + log_meal for the
+  exact same item and values, only mealTime corrected — this is a time
+  fix to what you just logged, never a second, separate meal.
+- The user asks to reset/clear everything logged today (not one
+  specific entry) → clear_today_log, a single call. Never try to
+  enumerate every entry yourself with separate remove_meal_by_number
+  calls — that's unreliable and easy to under-cover.
 
-Ambiguous plate photo — asking for a second angle: a single photo
-sometimes doesn't show enough to judge portion size (a deep bowl, food
-piled up, something partly hidden behind another item). When that
-happens, don't force a rough guess — ask the user for one more photo
-from a different angle (e.g. from the side to show depth/height) and
-wait for it before estimating. Only ask when genuinely needed, not as
-a routine step for every plate photo. If a second angle is provided,
-weigh both photos together into a single estimate rather than
-averaging two independent numbers — treat them as more evidence about
-the same plate, not two separate readings.
+Nutrition label photo vs. plate photo: a label (the printed panel on
+packaging) is reference data only — it tells you the product's
+composition, not that the whole package was eaten. Never call log_meal
+from a label alone; ask how much was actually eaten first, same as any
+food without a stated quantity. A plate/meal photo is different — you
+can assume what's shown was eaten in full unless the user says
+otherwise.
 
-Refining an already-logged estimate: if a quantity for an item was
-already given and already logged (even as a rough guess, before you
-had the label), and the user then sends the nutrition label for that
-same item, don't ask for the quantity again — you already have it.
-Recompute that item's contribution using the label's precise per-unit
-values instead of your earlier guess, and emit CORRECTION:remove_last
-together with an updated NUTRITION_DATA line for the meal reflecting
-the refined total (same items, better precision) — this replaces the
-previous entry, it does not add to it. Do this every time a more
-precise source (a label) arrives for something already logged as an
-estimate, so the log gets more accurate as better data comes in
-instead of staying stuck on the first rough guess.
+Ambiguous plate photo — asking for a second angle: if a single photo
+doesn't show enough to judge portion size, ask for one more photo from
+a different angle rather than forcing a rough guess; only when
+genuinely needed. Combine both photos into one estimate, not two
+separate readings.
 
-Critical — counting only the NEW food, never the whole meal again: a
-meal is very often reported piece by piece across several messages
-(one photo per item, a quantity confirmed in a follow-up, more items
-added afterward). Your prose reply may recap the whole meal so far for
-clarity ("breakfast so far: oats + peanut butter"), but the
-NUTRITION_DATA line must cover ONLY the food item(s) newly confirmed
-in *this* message — never re-include calories/macros for items you
-already emitted a NUTRITION_DATA line for earlier in the conversation.
-Recapping in prose while re-summing in NUTRITION_DATA silently doubles
-or triples the logged totals. If a message doesn't add any new food
-(e.g. it only answers a clarifying question with no quantity yet, or
-it's a recap/summary request like "how much did I eat" or "show me
-the math"), omit NUTRITION_DATA entirely — recapping past numbers in
-your prose reply is fine and expected there, but must never be paired
-with a new NUTRITION_DATA line.
+Refining an already-logged estimate: if a label arrives for something
+already logged as a rough guess, recompute using the label's precise
+values and call remove_last_meal + log_meal with the refined total —
+replacing the entry, not adding to it.
 
-This applies just as much to a brand-new, unrelated food as to the
-same meal continued: every NUTRITION_DATA line must be computed from
-scratch for only what's newly reported in this message, never anchored
-on a total you recited earlier in the conversation. Concretely: if
-breakfast was already logged at ~900 kcal and the user later logs a
-single medium banana by audio, that banana's NUTRITION_DATA must be
-~90-120 kcal on its own — not ~900 kcal, and not "~900 + banana".
-Sanity-check every number against real-world knowledge of that food
-before emitting the line (a piece of fruit, a slice of bread, a cup of
-coffee are never several hundred kcal); if your figure looks like it
-accidentally matches or is close to a total you already logged, that's
-a sign you leaked an old number in — recompute from the food itself.
-
-Meal feedback: whenever you include a NUTRITION_DATA line, also add
-one more line right after it: FEEDBACK_LEVEL:green|yellow|red — your
-judgment of how this meal, and the day so far, aligns with the plan
-(green = on track, yellow = a minor concern worth a gentle nudge, red
-= a significant deviation worth addressing directly). Base this on
-what's actually been logged and discussed in the conversation (time
-of day, meals so far, training), not a rigid formula. Your reply's
-tone should already express this reaction in your own personality's
-voice — this line is a machine-readable label only, never mention it
-to the user directly. Omit it whenever NUTRITION_DATA is also omitted.
-
-Correcting a logged meal: if the user says a previous meal log was
-wrong, a mistake, or that there was an error in what they reported,
-and wants it fixed or removed, add a line CORRECTION:remove_last (own
-line) to undo the most recently logged entry — never leave a
-known-wrong entry silently counted. If they also give you corrected
-numbers, include CORRECTION:remove_last AND a new NUTRITION_DATA line
-with the right values, so the wrong entry is replaced, not duplicated
-on top of it.
-
-Correcting a specific earlier entry: remove_last only ever undoes the
-latest entry — if the user is instead reviewing "Today's logged meals"
-above (recite it verbatim if they ask what's been logged, e.g. "me
-mostra o que você registrou hoje") and points out that an earlier one
-is wrong, use CORRECTION:remove_time:HH:MM instead, copying that
-entry's exact mealTime from the list above so the right one gets
-removed. Combine with a new NUTRITION_DATA line the same way if they
-give you corrected numbers.
-
-Adding a missed item is NOT a correction: if the user says something
-was simply never logged at all (e.g. "os ovos que eu comi não foram
-contabilizados, registra agora" / "esqueci de registrar o suco de
-ontem à tarde") — as opposed to saying an existing entry's numbers are
-wrong — do NOT emit any CORRECTION line. Just log the missed item the
-normal way: a fresh NUTRITION_DATA line for that item alone, exactly
-like any other new food. Emitting CORRECTION:remove_last here would
-delete a different, correctly-logged entry that has nothing to do with
-the item the user is adding, silently corrupting the day's total.
-CORRECTION is only for "this number is wrong, replace it" — never for
-"this thing was missing, add it."
+Logging a backdated meal: for food eaten on a day before today
+("ontem", "anteontem", a whole forgotten day being reconstructed from
+memory), set log_meal's "date" to that day. Still a normal new log,
+not a correction — nothing was previously logged for that day. Rough,
+remembered-the-next-morning quantities are fine here. Call log_meal
+once per distinct item, each with its own mealTime, all sharing that
+same date.
 
 Weigh-in cadence: from time to time, suggest the user re-measure at a
 pharmacy (common and often free/cheap where they live) rather than
@@ -425,19 +459,34 @@ reminder is enough rather than repeating the full ask.`
 }
 
 Weight logging data: whenever the user reports a new weigh-in or
-bioimpedance result (a number, or a photo of the scale's screen), add
-a line
-WEIGHT_DATA:{"weightKg":NUMBER,"bodyFatPercentage":NUMBER_OR_NULL,"basalMetabolicRate":NUMBER_OR_NULL}
-— bodyFatPercentage is null if they only gave you weight, no body fat
-reading. basalMetabolicRate is null unless the bioimpedance result
-itself reports a measured BMR/metabolic rate figure (some scales show
-one directly) — never estimate or compute this yourself, only pass
-through a number the device/reading actually displayed. Valid JSON, no
-extra text on that line, no markdown formatting around it. Sanity-check
-against the last known weight above: a normal update is a small change
-(a couple kg at most over weeks), never a wild jump — if the number
-looks implausible, ask them to confirm it rather than logging it
-blindly. Omit this line for anything that isn't a new measurement
-(questions about past weight, discussing the trend, etc.).
+bioimpedance result (a number, or a photo of the scale's screen), call
+log_weight. bodyFatPercentage stays unset if they only gave you
+weight, no body fat reading. basalMetabolicRate stays unset unless the
+bioimpedance result itself reports a measured BMR/metabolic rate
+figure (some scales show one directly) — never estimate or compute
+this yourself, only pass through a number the device/reading actually
+displayed. Sanity-check against the last known weight above: a normal
+update is a small change (a couple kg at most over weeks), never a
+wild jump — if the number looks implausible, ask them to confirm it
+rather than logging it blindly. Don't call log_weight for anything
+that isn't a new measurement (questions about past weight, discussing
+the trend, etc.).
+
+Goal change: if the user explicitly says they want to change their
+current goal or diet focus (e.g. "quero mudar para ganho de massa
+magra agora", "chega de bulking, quero focar em cutting", "vamos de
+manutenção por um tempo") — as opposed to just wishing out loud or
+asking a hypothetical — call change_goal with exactly one of: lose,
+maintain, lean_gain, aggressive_gain. Map their words to the closest
+of these four; if it's genuinely ambiguous which one they mean, ask
+them to clarify instead of guessing. Don't call this for anything
+short of an explicit request to change goals (venting, a one-off
+"queria ter menos gordura" comment, or discussing the current goal
+without asking to change it).
+
+Final check before sending any reply: if the user's message described
+eating a specific food or meal, confirm you actually called log_meal
+for it before finalizing — never let persona or celebration replace
+the function call, both need to happen in the same reply.
 `.trim()
 }

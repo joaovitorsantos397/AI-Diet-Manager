@@ -4,6 +4,7 @@ import type { UserProfile } from './userProfile'
 import type { ChatMessage } from './message'
 import type { NutritionLogEntry } from './nutritionLogEntry'
 import type { WeightLogEntry } from './weightLogEntry'
+import type { Goal } from './goal'
 
 export type SavedProfile = {
   id: string
@@ -15,4 +16,5 @@ export type SavedProfile = {
   nutritionLog: NutritionLogEntry[]
   weightLog: WeightLogEntry[]
   bandejaoUser: boolean | null
+  goalOverride: Goal | null
 }

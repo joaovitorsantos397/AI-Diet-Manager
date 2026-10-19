@@ -7,22 +7,20 @@ import type { ChatMessage } from '../types/message'
 import type { UserProfile } from '../types/userProfile'
 import type { NutritionLogEntry } from '../types/nutritionLogEntry'
 import type { WeightLogEntry } from '../types/weightLogEntry'
+import type { Goal } from '../types/goal'
+import type { Macros } from '../types/macros'
 import { COACHES } from '../data/coaches'
 import { sendChatMessage } from '../services/chatService'
 import { transcribeAudio } from '../services/transcriptionService'
 import { buildSystemInstruction } from '../services/promptBuilder'
 import { fetchTodaysBandejaoMenu } from '../services/bandejaoService'
-import { extractBandejaoUser } from '../services/bandejaoUserExtractor'
 import type { BandejaoMenu } from '../types/bandejaoMenu'
-import { extractNutritionData } from '../services/nutritionExtractor'
-import { extractWeightData } from '../services/weightExtractor'
 import { extractFeedbackLevel } from '../services/feedbackExtractor'
-import { extractCorrection } from '../services/correctionExtractor'
 import { calculateDailyCalories } from '../services/calorieCalculator'
 import { calculateMacros } from '../services/macroCalculator'
 import { getEffectiveProfile } from '../services/weightLog'
 import { getTotalsForDay } from '../services/nutritionLog'
-import { isSameDay } from '../utils/date'
+import { isSameDay, resolveLoggedTimestamp } from '../utils/date'
 import { resizeImageForUpload } from '../utils/image'
 import EvolutionScreen from './EvolutionScreen'
 
@@ -34,12 +32,31 @@ type ChatScreenProps = {
   initialNutritionLog?: NutritionLogEntry[]
   initialWeightLog?: WeightLogEntry[]
   initialBandejaoUser?: boolean | null
+  initialGoalOverride?: Goal | null
   onStateChange?: (
     messages: ChatMessage[],
     nutritionLog: NutritionLogEntry[],
     weightLog: WeightLogEntry[],
     bandejaoUser: boolean | null,
+    goalOverride: Goal | null,
   ) => void
+}
+
+function formatTargetsSummary(
+  calories: number,
+  macros: Macros,
+  language: Language,
+): string {
+  return language === 'pt'
+    ? `Calorias: ${calories} kcal\nProteína: ${macros.proteinGrams}g · Carboidratos: ${macros.carbsGrams}g · Gordura: ${macros.fatGrams}g\nÁgua: ${(macros.waterMl / 1000).toFixed(1)}L`
+    : `Calories: ${calories} kcal\nProtein: ${macros.proteinGrams}g · Carbs: ${macros.carbsGrams}g · Fat: ${macros.fatGrams}g\nWater: ${(macros.waterMl / 1000).toFixed(1)}L`
+}
+
+const GOAL_LABELS: Record<Goal, { pt: string; en: string }> = {
+  lose: { pt: 'Emagrecimento', en: 'Weight loss' },
+  maintain: { pt: 'Manutenção', en: 'Maintenance' },
+  lean_gain: { pt: 'Ganho de massa magra', en: 'Lean muscle gain' },
+  aggressive_gain: { pt: 'Bulking', en: 'Bulking' },
 }
 
 const MESSAGE_SPLIT_MARKER = '|||'
@@ -113,6 +130,7 @@ function ChatScreen({
   initialNutritionLog,
   initialWeightLog,
   initialBandejaoUser,
+  initialGoalOverride,
   onStateChange,
 }: ChatScreenProps) {
   const coach = COACHES.find((option) => option.value === coachId)!
@@ -133,6 +151,9 @@ function ChatScreen({
   const [bandejaoUser, setBandejaoUser] = useState<boolean | null>(
     initialBandejaoUser ?? null,
   )
+  const [goalOverride, setGoalOverride] = useState<Goal | null>(
+    initialGoalOverride ?? null,
+  )
   const [bandejaoMenu, setBandejaoMenu] = useState<BandejaoMenu | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -147,15 +168,15 @@ function ChatScreen({
     initialMessages?.[0]?.timestamp ?? Date.now(),
   )
 
-  const effectiveProfile = getEffectiveProfile(profile, weightLog)
+  const effectiveProfile = getEffectiveProfile(profile, weightLog, goalOverride)
   const calories = calculateDailyCalories(effectiveProfile)
   const macros = calculateMacros(effectiveProfile, calories)
   const todayTotals = getTotalsForDay(nutritionLog)
 
   useEffect(() => {
-    onStateChange?.(messages, nutritionLog, weightLog, bandejaoUser)
+    onStateChange?.(messages, nutritionLog, weightLog, bandejaoUser, goalOverride)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, nutritionLog, weightLog, bandejaoUser])
+  }, [messages, nutritionLog, weightLog, bandejaoUser, goalOverride])
 
   useEffect(() => {
     if (bandejaoUser === true) {
@@ -164,8 +185,12 @@ function ChatScreen({
   }, [bandejaoUser])
 
   useEffect(() => {
+    // showEvolution is in the deps too: returning from the Evolution screen
+    // remounts this chat view fresh (it's an early-return replacement, not
+    // an overlay), so without it the container silently stays scrolled to
+    // its default top instead of jumping back to the latest message.
     messagesEndRef.current?.scrollIntoView({ block: 'end' })
-  }, [messages, isSending])
+  }, [messages, isSending, showEvolution])
 
   async function sendToModel(
     fullMessages: ChatMessage[],
@@ -175,7 +200,7 @@ function ChatScreen({
     setIsSending(true)
 
     try {
-      const reply = await sendChatMessage({
+      const { text, functionCalls } = await sendChatMessage({
         messages: fullMessages,
         systemInstruction: buildSystemInstruction({
           coachId,
@@ -185,63 +210,192 @@ function ChatScreen({
           weightLog,
           bandejaoUser,
           bandejaoMenu,
+          goalOverride,
           conversationStartedAt: conversationStartedAtRef.current,
         }),
       })
 
-      const { cleanedReply: replyAfterBandejaoUser, bandejaoUser: newBandejaoUser } =
-        extractBandejaoUser(reply)
+      console.debug('Model reply:', { text, functionCalls })
+
+      let newBandejaoUser: boolean | null = null
+      let shouldRemoveLast = false
+      let shouldClearToday = false
+      const removeMealNumbers: number[] = []
+      const newMealEntries: NutritionLogEntry[] = []
+      let newWeightEntry: WeightLogEntry | null = null
+      let newGoal: Goal | null = null
+
+      for (const call of functionCalls) {
+        const args = call.args ?? {}
+        switch (call.name) {
+          case 'clear_today_log':
+            shouldClearToday = true
+            break
+          case 'log_meal': {
+            const mealTime =
+              typeof args.mealTime === 'string' ? args.mealTime : ''
+            const loggedDate =
+              typeof args.date === 'string' &&
+              /^\d{4}-\d{2}-\d{2}$/.test(args.date)
+                ? args.date
+                : null
+            newMealEntries.push({
+              id: crypto.randomUUID(),
+              timestamp: resolveLoggedTimestamp(loggedDate, mealTime),
+              calories: Number(args.calories) || 0,
+              proteinGrams: Number(args.proteinGrams) || 0,
+              carbsGrams: Number(args.carbsGrams) || 0,
+              fatGrams: Number(args.fatGrams) || 0,
+              description:
+                typeof args.description === 'string' ? args.description : '',
+              mealTime,
+            })
+            break
+          }
+          case 'remove_last_meal':
+            shouldRemoveLast = true
+            break
+          case 'remove_meal_by_number': {
+            const entryNumber = Number(args.entryNumber)
+            if (Number.isInteger(entryNumber) && entryNumber > 0) {
+              removeMealNumbers.push(entryNumber)
+            }
+            break
+          }
+          case 'log_weight': {
+            const weightKg = Number(args.weightKg) || 0
+            if (weightKg > 0) {
+              newWeightEntry = {
+                id: crypto.randomUUID(),
+                timestamp: Date.now(),
+                weightKg,
+                bodyFatPercentage:
+                  args.bodyFatPercentage === null ||
+                  args.bodyFatPercentage === undefined
+                    ? null
+                    : Number(args.bodyFatPercentage),
+                basalMetabolicRate:
+                  args.basalMetabolicRate === null ||
+                  args.basalMetabolicRate === undefined
+                    ? null
+                    : Number(args.basalMetabolicRate),
+              }
+            }
+            break
+          }
+          case 'change_goal': {
+            const goal = args.goal
+            if (
+              goal === 'lose' ||
+              goal === 'maintain' ||
+              goal === 'lean_gain' ||
+              goal === 'aggressive_gain'
+            ) {
+              newGoal = goal
+            }
+            break
+          }
+          case 'set_bandejao_user':
+            newBandejaoUser = Boolean(args.isBandejaoUser)
+            break
+          default:
+            break
+        }
+      }
+
+      // Deterministic safety net: the model is instructed to call log_meal
+      // once per distinct item, but a single response calling it more than
+      // once for the exact same item (identical values) is never
+      // intentional — collapse those down to one entry instead of trusting
+      // prompt compliance alone for something this consequential.
+      const seenMealSignatures = new Set<string>()
+      const dedupedMealEntries = newMealEntries.filter((entry) => {
+        const signature = [
+          entry.calories,
+          entry.proteinGrams,
+          entry.carbsGrams,
+          entry.fatGrams,
+          entry.description,
+          entry.mealTime,
+        ].join('|')
+        if (seenMealSignatures.has(signature)) {
+          console.warn('Dropped duplicate log_meal call in the same reply:', entry)
+          return false
+        }
+        seenMealSignatures.add(signature)
+        return true
+      })
+
       if (newBandejaoUser !== null) {
         setBandejaoUser(newBandejaoUser)
       }
-      const { cleanedReply: replyAfterNutrition, entry } =
-        extractNutritionData(replyAfterBandejaoUser)
-      const { cleanedReply: replyAfterWeight, entry: weightEntry } =
-        extractWeightData(replyAfterNutrition)
-      const {
-        cleanedReply: replyAfterCorrection,
-        shouldRemoveLast,
-        removeMealTime,
-      } = extractCorrection(replyAfterWeight)
-      const { cleanedReply, level } = extractFeedbackLevel(
-        replyAfterCorrection,
-      )
 
-      if (shouldRemoveLast || removeMealTime || entry) {
+      if (
+        shouldClearToday ||
+        shouldRemoveLast ||
+        removeMealNumbers.length > 0 ||
+        dedupedMealEntries.length > 0
+      ) {
         setNutritionLog((current) => {
-          let updated = shouldRemoveLast ? current.slice(0, -1) : current
-          if (removeMealTime) {
+          // #N refers to the entry's position in "Today's logged meals" as
+          // the model actually read it (promptBuilder.ts sorts today's
+          // entries by timestamp ascending) — resolved against the
+          // pre-turn state, before any other change from this same turn.
+          const todaysEntryIds = current
+            .filter((entry) => isSameDay(new Date(entry.timestamp), new Date()))
+            .sort((a, b) => a.timestamp - b.timestamp)
+            .map((entry) => entry.id)
+          const idsToRemoveByNumber = new Set(
+            removeMealNumbers
+              .map((n) => todaysEntryIds[n - 1])
+              .filter((id): id is string => id !== undefined),
+          )
+
+          let updated = shouldClearToday
+            ? current.filter(
+                (logEntry) => !isSameDay(new Date(logEntry.timestamp), new Date()),
+              )
+            : current
+          updated = shouldRemoveLast ? updated.slice(0, -1) : updated
+          if (idsToRemoveByNumber.size > 0) {
             updated = updated.filter(
-              (logEntry) =>
-                !(
-                  logEntry.mealTime === removeMealTime &&
-                  isSameDay(new Date(logEntry.timestamp), new Date())
-                ),
+              (logEntry) => !idsToRemoveByNumber.has(logEntry.id),
             )
           }
-          return entry
-            ? [
-                ...updated,
-                { id: crypto.randomUUID(), timestamp: Date.now(), ...entry },
-              ]
-            : updated
+          return [...updated, ...dedupedMealEntries]
         })
       }
 
-      let newWeightEntry: WeightLogEntry | null = null
-      if (weightEntry) {
-        newWeightEntry = {
-          id: crypto.randomUUID(),
-          timestamp: Date.now(),
-          ...weightEntry,
-        }
+      if (newWeightEntry) {
         setWeightLog((current) => [...current, newWeightEntry!])
       }
 
+      const goalChanged = newGoal !== null && newGoal !== effectiveProfile.goal
+      if (goalChanged) {
+        setGoalOverride(newGoal)
+      }
+
+      const { cleanedReply, level } = extractFeedbackLevel(text)
       const parts = cleanedReply
         .split(MESSAGE_SPLIT_MARKER)
         .map((part) => part.trim())
         .filter((part) => part !== '')
+
+      // The model is instructed to always include text alongside any
+      // function calls, but that's still a prompt instruction, not a
+      // guarantee — a turn that's all function calls and no text would
+      // otherwise leave the user staring at silence with no sign their
+      // message was even received.
+      const isFallbackReply = parts.length === 0 && functionCalls.length > 0
+      if (isFallbackReply) {
+        console.warn(
+          'Reply had no text; falling back to a generic confirmation. Function calls received:',
+          functionCalls,
+        )
+        parts.push(
+          language === 'pt' ? 'Feito.' : 'Done.',
+        )
+      }
 
       for (const [index, part] of parts.entries()) {
         setMessages((current) => [
@@ -253,6 +407,10 @@ function ChatScreen({
             content: part,
             timestamp: Date.now(),
             ...(level ? { feedbackLevel: level } : {}),
+            // Never fed back to the model as history — it didn't actually
+            // write this, and seeing it in its own past turns would teach
+            // it (in-context) to keep replying this tersely.
+            ...(isFallbackReply ? { isSynthetic: true } : {}),
           },
         ])
         if (useTypingDelay && index < parts.length - 1) {
@@ -260,15 +418,16 @@ function ChatScreen({
         }
       }
 
-      // Never let the target change happen silently in the background —
-      // tell the user with the app's own computed numbers (ground truth),
-      // not the model's prose, the same principle used everywhere else in
-      // this file (NUTRITION_DATA, corrections, etc.).
+      // Never let a target change happen silently in the background — tell
+      // the user with the app's own computed numbers (ground truth), not
+      // the model's prose, the same principle used everywhere else in this
+      // file (NUTRITION_DATA, corrections, etc.).
       if (newWeightEntry) {
-        const updatedProfile = getEffectiveProfile(profile, [
-          ...weightLog,
-          newWeightEntry,
-        ])
+        const updatedProfile = getEffectiveProfile(
+          profile,
+          [...weightLog, newWeightEntry],
+          goalOverride,
+        )
         const updatedCalories = calculateDailyCalories(updatedProfile)
         const updatedMacros = calculateMacros(updatedProfile, updatedCalories)
 
@@ -279,10 +438,35 @@ function ChatScreen({
             role: 'coach',
             type: 'text',
             content:
-              language === 'pt'
-                ? `Novo peso registrado — recalculando suas metas com base nele:\n\nCalorias: ${updatedCalories} kcal\nProteína: ${updatedMacros.proteinGrams}g · Carboidratos: ${updatedMacros.carbsGrams}g · Gordura: ${updatedMacros.fatGrams}g\nÁgua: ${(updatedMacros.waterMl / 1000).toFixed(1)}L`
-                : `New weight logged — recalculating your targets from it:\n\nCalories: ${updatedCalories} kcal\nProtein: ${updatedMacros.proteinGrams}g · Carbs: ${updatedMacros.carbsGrams}g · Fat: ${updatedMacros.fatGrams}g\nWater: ${(updatedMacros.waterMl / 1000).toFixed(1)}L`,
+              (language === 'pt'
+                ? 'Novo peso registrado — recalculando suas metas com base nele:\n\n'
+                : 'New weight logged — recalculating your targets from it:\n\n') +
+              formatTargetsSummary(updatedCalories, updatedMacros, language),
             timestamp: Date.now(),
+            isSynthetic: true,
+          },
+        ])
+      }
+
+      if (goalChanged) {
+        const updatedProfile = getEffectiveProfile(profile, weightLog, newGoal)
+        const updatedCalories = calculateDailyCalories(updatedProfile)
+        const updatedMacros = calculateMacros(updatedProfile, updatedCalories)
+        const goalLabel = GOAL_LABELS[newGoal!][language]
+
+        setMessages((current) => [
+          ...current,
+          {
+            id: crypto.randomUUID(),
+            role: 'coach',
+            type: 'text',
+            content:
+              (language === 'pt'
+                ? `Objetivo atualizado para "${goalLabel}" — recalculando suas metas com base nele:\n\n`
+                : `Goal updated to "${goalLabel}" — recalculating your targets from it:\n\n`) +
+              formatTargetsSummary(updatedCalories, updatedMacros, language),
+            timestamp: Date.now(),
+            isSynthetic: true,
           },
         ])
       }

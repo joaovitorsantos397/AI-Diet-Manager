@@ -4,6 +4,7 @@ import type { UserProfile } from '../types/userProfile'
 import type { ChatMessage } from '../types/message'
 import type { NutritionLogEntry } from '../types/nutritionLogEntry'
 import type { WeightLogEntry } from '../types/weightLogEntry'
+import type { Goal } from '../types/goal'
 
 const STORAGE_KEY = 'ai-diet-manager:session'
 
@@ -15,6 +16,7 @@ export type StoredSession = {
   nutritionLog: NutritionLogEntry[]
   weightLog: WeightLogEntry[]
   bandejaoUser: boolean | null
+  goalOverride: Goal | null
 }
 
 export function getSession(): StoredSession | null {
