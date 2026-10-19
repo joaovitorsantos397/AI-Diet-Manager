@@ -2,6 +2,8 @@ import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import { GoogleGenAI, Type } from '@google/genai'
+import { openDatabase } from './db/connection.js'
+import { createMealsRouter } from './routes/meals.js'
 
 const apiKey = process.env.GEMINI_API_KEY
 
@@ -16,6 +18,9 @@ const app = express()
 app.use(cors())
 // Default 100kb limit is too small for base64-encoded photos/audio.
 app.use(express.json({ limit: '25mb' }))
+
+const db = openDatabase()
+app.use(createMealsRouter(db))
 
 // Structured actions the coach can take, declared as real function-calling
 // tools instead of a text convention ("add a line NUTRITION_DATA:{...}")

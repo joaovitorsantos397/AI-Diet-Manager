@@ -1443,6 +1443,28 @@ Vitest was added as the test runner (no existing choice to replace, and it integ
 
 ---
 
+# 2026-10-19
+
+## Decision
+
+Add a SQL persistence layer (`meal_groups` + `meal_items`, SQLite) and a REST API over it (`server/routes/meals.js`), using Node's built-in `node:sqlite` as the driver.
+
+### Reason
+
+The app's backend had no database at all (everything lived in the browser's localStorage), and the backend had no resource-oriented REST API — only the `/api/chat` proxy. Both were worth closing as part of this project's own stated goals (see `docs/02_ARCHITECTURE.md` and the README's Technology Stack "Future" section).
+
+The schema deliberately mirrors the "one meal, several items" shape that caused the `remove_last_meal` bug fixed earlier today, as a concrete, already-familiar example to reason about joins, aggregation and cascading deletes against. For the driver: `node:sqlite` (built into Node since 22.5, no new dependency, no native compilation) was chosen over `better-sqlite3` specifically because the Dockerfile and CI both already pin Node 22, and `better-sqlite3`'s native binary would need extra build tooling on Alpine that couldn't be verified locally (no Docker installed on this machine). See `docs/DATABASE.md` for the full schema, query explanations and current limitations.
+
+### Expected Benefits
+
+- Parameterized queries throughout (no string-built SQL), closing off SQL injection by construction rather than by review.
+- `ON DELETE CASCADE` + `PRAGMA foreign_keys = ON` means removing a meal removes it as a whole at the database level, not just in the UI's own correction logic.
+- Zero new npm dependencies for the database driver itself.
+- Verified with `npm test`, `npm run build`, `npm run lint`, and a manual `curl` smoke test against the real running server.
+- Known limitation, by design for this phase: the UI still reads and writes only to localStorage — this API has no consumer yet in the frontend.
+
+---
+
 # Future Decisions
 
 This section should be continuously updated as the project evolves.
