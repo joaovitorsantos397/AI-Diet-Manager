@@ -31,8 +31,11 @@ Current implementation includes:
 - Meal logging by text, photo or audio (Gemini vision and transcription)
 - Progress tracking (calories, protein, weight, adherence streaks)
 - Totals computed by the app and passed to the model as context, to avoid hallucinated or double-counted numbers
+- Meal corrections (undo the last meal, undo a specific earlier item, or clear the day) via typed Gemini function calls, not free-text parsing
 - React + TypeScript architecture
 - Language selection
+- Automated test suite (Vitest) for the calorie/macro math and meal-correction logic
+- Dockerized backend with a CI pipeline (lint, build, test on every push/PR)
 - Modular project structure
 - Technical documentation
 - Product documentation
@@ -56,6 +59,12 @@ Backend
 - Node.js
 - Express
 - Gemini API
+
+Testing & Infrastructure
+
+- Vitest
+- Docker / Docker Compose
+- GitHub Actions (CI)
 
 Development
 
@@ -102,7 +111,8 @@ Detailed documentation is available in the `docs/` directory.
 | 04\_ROADMAP.md          | Project roadmap                        |
 | 05\_PROJECT\_FAQ.md     | Project FAQ and retrospective          |
 | 06\_DESIGN\_SYSTEM.md   | Visual and interaction design language |
-| 99\_AI\_CONTEXT.md      | Context for future AI assistants       |
+
+99\_AI\_CONTEXT.md is planned but not written yet — see 04\_ROADMAP.md.
 
 ---
 
@@ -156,6 +166,37 @@ Build for production:
 ```
 npm run build
 ```
+
+Run the test suite:
+
+```
+npm test
+```
+
+## Running the backend with Docker
+
+As an alternative to `npm run server`, the backend can run in a
+container (frontend still runs separately with `npm run dev`):
+
+```
+GEMINI_API_KEY=your-key-here docker compose up --build
+```
+
+This exposes the API on `http://localhost:3001`, with `GET /health`
+for a quick liveness check.
+
+---
+
+# Known Issues
+
+- **Audio transcription is currently broken.** The chat endpoint's
+  response shape changed (`{ text, functionCalls}` instead of a plain
+  `{ reply }`) when it was migrated to Gemini function calling, and
+  `transcriptionService.ts` was never updated to match — it always
+  reads `undefined` and the user sees a generic "couldn't transcribe"
+  message. Logging via text or photo is unaffected. See
+  `docs/03_DECISION_LOG.md` (2026-10-19) for details; left unfixed for
+  now to prioritize test/Docker/CI coverage.
 
 ---
 
