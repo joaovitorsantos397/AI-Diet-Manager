@@ -37,6 +37,7 @@ Current implementation includes:
 - Automated test suite (Vitest) for the calorie/macro math and meal-correction logic
 - Dockerfile and docker-compose for the backend (image build not yet validated)
 - CI pipeline (lint, build, test on every push/PR)
+- SQL-backed REST API for meal logging (SQLite via `node:sqlite`), not yet wired into the UI — see `docs/DATABASE.md`
 - Modular project structure
 - Technical documentation
 - Product documentation
@@ -66,6 +67,7 @@ Testing & Infrastructure
 - Vitest
 - Docker / Docker Compose
 - GitHub Actions (CI)
+- SQLite (`node:sqlite`)
 
 Development
 
@@ -112,6 +114,7 @@ Detailed documentation is available in the `docs/` directory.
 | 04\_ROADMAP.md          | Project roadmap                        |
 | 05\_PROJECT\_FAQ.md     | Project FAQ and retrospective          |
 | 06\_DESIGN\_SYSTEM.md   | Visual and interaction design language |
+| DATABASE.md             | SQL schema, query explanations, limitations |
 
 99\_AI\_CONTEXT.md is planned but not written yet — see 04\_ROADMAP.md.
 
@@ -186,6 +189,44 @@ GEMINI_API_KEY=your-key-here docker compose up --build
 
 This exposes the API on `http://localhost:3001`, with `GET /health`
 for a quick liveness check.
+
+---
+
+# API
+
+A small SQL-backed REST API for meal logging lives alongside the chat
+proxy (see `docs/DATABASE.md` for the schema and query details). It
+has no UI consumer yet — the app itself still uses localStorage; this
+API is tested and usable on its own. `profile_id` comes from the
+`X-Profile-Id` header (defaults to `default`).
+
+```
+# Log a meal (one group with its items)
+curl -X POST http://localhost:3001/api/meals \
+  -H "Content-Type: application/json" \
+  -H "X-Profile-Id: joao" \
+  -d '{
+    "eatenAt": "2026-10-19T12:00:00Z",
+    "description": "Lunch",
+    "items": [
+      { "name": "Rice", "kcal": 200, "proteinG": 4, "carbsG": 45, "fatG": 0 },
+      { "name": "Chicken", "kcal": 250, "proteinG": 40, "carbsG": 0, "fatG": 8 }
+    ]
+  }'
+
+# List meals for a day
+curl "http://localhost:3001/api/meals?date=2026-10-19" -H "X-Profile-Id: joao"
+
+# Totals for a day, or for a date range (one row per day)
+curl "http://localhost:3001/api/totals?date=2026-10-19" -H "X-Profile-Id: joao"
+curl "http://localhost:3001/api/totals?from=2026-10-13&to=2026-10-19" -H "X-Profile-Id: joao"
+
+# Undo the last logged meal (whole group, not one item)
+curl -X DELETE http://localhost:3001/api/meals/last -H "X-Profile-Id: joao"
+
+# Clear everything logged on a day
+curl -X DELETE "http://localhost:3001/api/meals?date=2026-10-19" -H "X-Profile-Id: joao"
+```
 
 ---
 
