@@ -140,6 +140,10 @@ const TOOLS = [
   },
 ]
 
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' })
+})
+
 app.post('/api/chat', async (req, res) => {
   const { contents, systemInstruction } = req.body
 
