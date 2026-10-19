@@ -1382,6 +1382,67 @@ used for `NUTRITION_DATA` and the health-history context block.
 
 ---
 
+# 2026-10-19
+
+## Decision
+
+Document, retroactively, the migration from text-marker corrections (`NUTRITION_DATA:{...}`, `CORRECTION:remove_last`) to typed Gemini function-calling tools (`log_meal`, `remove_last_meal`, `remove_meal_by_number`, `clear_today_log`, `log_weight`, `change_goal`, `set_bandejao_user`).
+
+### Reason
+
+The 2026-07-26 entries below describe the original text-marker convention. That convention no longer exists in the code — it was replaced by Gemini's function-calling API at some point after, but the migration itself was never recorded here, so the log and the code had drifted apart. An audit of the codebase against this log surfaced the gap.
+
+Text markers required the model to remember to emit a specific line correctly inside free-form text; a malformed line, or a skipped marker, silently dropped a logged meal or a correction with no error surfaced anywhere. Gemini's function-calling API enforces the parameter schema server-side, so an action either arrives as a valid, typed call or doesn't happen at all.
+
+### Expected Benefits
+
+- Actions (logging, removing, clearing, changing goal) can no longer silently vanish due to malformed text.
+- This entry keeps the decision log synchronized with the code, per this project's own documentation standard — the gap itself is the lesson: a migration this significant should have been logged when it happened, not reconstructed afterward.
+
+---
+
+# 2026-10-19
+
+## Decision
+
+Fix `remove_last_meal` removing a single logged item instead of the whole last reported meal.
+
+### Reason
+
+Manual testing found that asking the coach to remove the last logged meal only reduced the day's protein total by about 1g — far less than the meal actually logged. Investigation (reading `promptBuilder.ts`, `server/index.js` and `ChatScreen.tsx`, no guessing) found the cause: a meal reported in one message is logged as several `log_meal` calls, one per food item (by design, so each item gets its own accurate estimate), but `remove_last_meal` removed a single array entry (`.slice(0, -1)`). Removing "the last meal" removed only its most recently appended item, leaving the rest of that same meal still counted.
+
+Fix: every entry logged in the same model turn now shares a `mealGroupId`, and `remove_last_meal` removes every entry in the last group instead of one array slot. The dedup/removal logic was extracted out of `ChatScreen.tsx` into a pure, independently tested module (`services/mealCorrections.ts`), with characterization tests covering dedup, `#N` removal, last-meal-group removal, clearing today, same-turn log+remove, and resolution against the pre-turn state. The "last meal group" test specifically reproduces the bug: it fails against the old single-entry extraction and passes after the fix. The AI's correction rules in `promptBuilder.ts` were also updated so a single wrong value (even in the latest meal) now goes through `remove_meal_by_number` instead of `remove_last_meal`, since the latter now clears the entire meal rather than one item.
+
+### Expected Benefits
+
+- The day's totals now match what was actually removed, instead of under-correcting.
+- The fix is protected by an automated regression test, not just a manual re-check — the same bug can't silently come back unnoticed.
+- Verified with `npm test` and `npm run build`; a live re-test in the running app (logging a multi-item meal, then asking to remove the last one) is still outstanding, per this project's existing convention of flagging that explicitly rather than assuming it from the tests alone.
+
+---
+
+# 2026-10-19
+
+## Decision
+
+Add an automated test suite (vitest), Docker packaging for the backend, and a GitHub Actions CI workflow.
+
+### Reason
+
+The calculation logic (`calorieCalculator.ts`, `macroCalculator.ts`), the day-totals aggregation (`nutritionLog.ts`) and the meal-correction logic above had no automated coverage — every verification recorded earlier in this log was a manual, one-off check, with nothing to catch a regression later. Docker and CI were both entirely absent, so there was no reproducible way to run the backend outside a developer's own machine, and no automated gate before a change reached `main`.
+
+Vitest was added as the test runner (no existing choice to replace, and it integrates directly with the project's existing Vite setup). A `Dockerfile` (Node 22, production dependencies only) and `docker-compose.yml` containerize the Express backend, with a new `GET /health` endpoint so an orchestrator can check the process is up without depending on the Gemini-backed `/api/chat` route. A GitHub Actions workflow runs lint, build and test on every push to `main` and every pull request.
+
+### Expected Benefits
+
+- Regressions in calorie/macro math or meal corrections are now caught automatically instead of relying on memory of "this was manually verified once."
+- The backend can be built and run reproducibly on any machine with Docker, not just the original development machine.
+- A broken build or failing test is caught before merge instead of discovered later.
+- Known, deliberately deferred: `transcriptionService.ts` reads `data.reply` from the chat endpoint's response, but the endpoint has returned `{ text, functionCalls }` since the function-calling migration above — `data.reply` is always `undefined`, so audio transcription silently fails every time (caught by a try/catch, so the user just sees a generic "couldn't transcribe" message). This was found during the same audit that surfaced the undocumented function-calling migration, and is being left unfixed for now to prioritize test/Docker/CI coverage instead.
+- Verified with `npm run lint`, `npm run build` and `npm test`; the Docker image itself could not be built or run locally, since Docker isn't installed on the current development machine — pending a real `docker compose up` check.
+
+---
+
 # Future Decisions
 
 This section should be continuously updated as the project evolves.
