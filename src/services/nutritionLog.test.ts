@@ -13,6 +13,7 @@ function entry(
     fatGrams: 10,
     description: 'item',
     mealTime: '12:00',
+    mealGroupId: `id-${overrides.timestamp}`,
     ...overrides,
   }
 }
