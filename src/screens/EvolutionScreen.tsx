@@ -3,9 +3,14 @@ import './EvolutionScreen.css'
 import type { Language } from '../types/language'
 import type { NutritionLogEntry } from '../types/nutritionLogEntry'
 import type { WeightLogEntry } from '../types/weightLogEntry'
-import { getAdherenceStreakDays, getDailySeries } from '../services/nutritionLog'
+import {
+  getAdherenceStreakDays,
+  getDailySeries,
+  getWeeklySeries,
+} from '../services/nutritionLog'
 import type { DailySummary } from '../services/nutritionLog'
 import { getRecentWeightEntries } from '../services/weightLog'
+import CalendarHeatmap from './CalendarHeatmap'
 
 type EvolutionScreenProps = {
   language: Language
@@ -16,13 +21,23 @@ type EvolutionScreenProps = {
   onClose: () => void
 }
 
+type ChartPeriod = 'days' | 'weeks'
+
 const DAYS_TO_SHOW = 7
+const WEEKS_TO_SHOW = 8
 const WEIGHT_ENTRIES_TO_SHOW = 8
 const PLOT_HEIGHT_PX = 140
 
 function formatDayLabel(date: Date, language: Language): string {
   return new Intl.DateTimeFormat(language === 'pt' ? 'pt-BR' : 'en-US', {
     weekday: 'short',
+  }).format(date)
+}
+
+function formatWeekLabel(date: Date, language: Language): string {
+  return new Intl.DateTimeFormat(language === 'pt' ? 'pt-BR' : 'en-US', {
+    day: 'numeric',
+    month: 'short',
   }).format(date)
 }
 
@@ -90,6 +105,7 @@ type MiniBarChartProps = {
   max: number
   valueOf: (day: DailySummary) => number
   formatTitle: (day: DailySummary) => string
+  formatLabel?: (date: Date, language: Language) => string
   barClassName?: string
   showStatus?: boolean
 }
@@ -101,6 +117,7 @@ function MiniBarChart({
   max,
   valueOf,
   formatTitle,
+  formatLabel = formatDayLabel,
   barClassName,
   showStatus,
 }: MiniBarChartProps) {
@@ -139,7 +156,7 @@ function MiniBarChart({
       <div className="evolution-labels">
         {series.map((day) => (
           <span key={day.date.toISOString()} className="evolution-bar-label">
-            {formatDayLabel(day.date, language)}
+            {formatLabel(day.date, language)}
           </span>
         ))}
       </div>
@@ -156,11 +173,27 @@ function EvolutionScreen({
   onClose,
 }: EvolutionScreenProps) {
   const [showTable, setShowTable] = useState(false)
-  const series = getDailySeries(nutritionLog, targetCalories, DAYS_TO_SHOW)
+  const [chartPeriod, setChartPeriod] = useState<ChartPeriod>('days')
+  const [showFullWeightHistory, setShowFullWeightHistory] = useState(false)
+  const [showCalendar, setShowCalendar] = useState(false)
+
+  const series =
+    chartPeriod === 'days'
+      ? getDailySeries(nutritionLog, targetCalories, DAYS_TO_SHOW)
+      : getWeeklySeries(nutritionLog, targetCalories, WEEKS_TO_SHOW)
+  const formatLabel = chartPeriod === 'days' ? formatDayLabel : formatWeekLabel
+  const periodTarget =
+    chartPeriod === 'days' ? targetCalories : targetCalories * 7
+  const periodProteinTarget =
+    chartPeriod === 'days' ? targetProtein : targetProtein * 7
+
   const recentWeightEntries = getRecentWeightEntries(
     weightLog,
     WEIGHT_ENTRIES_TO_SHOW,
   )
+  const weightEntriesToShow = showFullWeightHistory
+    ? weightLog
+    : recentWeightEntries
   const streakDays = getAdherenceStreakDays(
     nutritionLog,
     targetCalories,
@@ -168,11 +201,11 @@ function EvolutionScreen({
   )
 
   const maxCalories = Math.max(
-    targetCalories,
+    periodTarget,
     ...series.map((day) => day.totals.calories),
   )
   const maxProtein = Math.max(
-    targetProtein,
+    periodProteinTarget,
     ...series.map((day) => day.totals.proteinGrams),
   )
 
@@ -187,9 +220,18 @@ function EvolutionScreen({
         >
           ←
         </button>
-        <strong>
-          {language === 'pt' ? 'Evolução (7 dias)' : 'Evolution (7 days)'}
-        </strong>
+        <strong>{language === 'pt' ? 'Evolução' : 'Evolution'}</strong>
+        <button
+          type="button"
+          className="chat-icon-button evolution-calendar-toggle"
+          onClick={() => setShowCalendar((current) => !current)}
+          aria-label={
+            language === 'pt' ? 'Abrir calendário' : 'Open calendar'
+          }
+          aria-pressed={showCalendar}
+        >
+          📅
+        </button>
       </header>
 
       <div className="evolution-content">
@@ -214,17 +256,62 @@ function EvolutionScreen({
           )}
         </div>
 
+        {showCalendar && (
+          <section className="evolution-chart-card">
+            <CalendarHeatmap
+              language={language}
+              nutritionLog={nutritionLog}
+              targetCalories={targetCalories}
+              targetProtein={targetProtein}
+            />
+          </section>
+        )}
+
+        <div
+          className="evolution-period-toggle"
+          role="group"
+          aria-label={
+            language === 'pt' ? 'Período do gráfico' : 'Chart period'
+          }
+        >
+          <button
+            type="button"
+            className={
+              chartPeriod === 'days'
+                ? 'text-button text-button-active'
+                : 'text-button'
+            }
+            onClick={() => setChartPeriod('days')}
+            aria-pressed={chartPeriod === 'days'}
+          >
+            {language === 'pt' ? 'Dias' : 'Days'}
+          </button>
+          <button
+            type="button"
+            className={
+              chartPeriod === 'weeks'
+                ? 'text-button text-button-active'
+                : 'text-button'
+            }
+            onClick={() => setChartPeriod('weeks')}
+            aria-pressed={chartPeriod === 'weeks'}
+          >
+            {language === 'pt' ? 'Semanas' : 'Weeks'}
+          </button>
+        </div>
+
         <section className="evolution-chart-card">
           <h2>{language === 'pt' ? 'Calorias' : 'Calories'}</h2>
           <MiniBarChart
             language={language}
             series={series}
-            target={targetCalories}
+            target={periodTarget}
             max={maxCalories}
             valueOf={(day) => day.totals.calories}
             formatTitle={(day) =>
-              `${formatDayLabel(day.date, language)}: ${day.totals.calories} kcal`
+              `${formatLabel(day.date, language)}: ${day.totals.calories} kcal`
             }
+            formatLabel={formatLabel}
             showStatus
           />
         </section>
@@ -234,20 +321,40 @@ function EvolutionScreen({
           <MiniBarChart
             language={language}
             series={series}
-            target={targetProtein}
+            target={periodProteinTarget}
             max={maxProtein}
             valueOf={(day) => day.totals.proteinGrams}
             formatTitle={(day) =>
-              `${formatDayLabel(day.date, language)}: ${day.totals.proteinGrams}g`
+              `${formatLabel(day.date, language)}: ${day.totals.proteinGrams}g`
             }
+            formatLabel={formatLabel}
             barClassName="evolution-bar-protein"
           />
         </section>
 
         <section className="evolution-chart-card">
-          <h2>{language === 'pt' ? 'Peso' : 'Weight'}</h2>
-          {recentWeightEntries.length > 0 ? (
-            <WeightChart language={language} entries={recentWeightEntries} />
+          <div className="evolution-chart-card-header">
+            <h2>{language === 'pt' ? 'Peso' : 'Weight'}</h2>
+            {weightLog.length > WEIGHT_ENTRIES_TO_SHOW && (
+              <button
+                type="button"
+                className="text-button"
+                onClick={() =>
+                  setShowFullWeightHistory((current) => !current)
+                }
+              >
+                {showFullWeightHistory
+                  ? language === 'pt'
+                    ? 'Ver recentes'
+                    : 'Show recent'
+                  : language === 'pt'
+                    ? 'Ver histórico completo'
+                    : 'Show full history'}
+              </button>
+            )}
+          </div>
+          {weightEntriesToShow.length > 0 ? (
+            <WeightChart language={language} entries={weightEntriesToShow} />
           ) : (
             <p className="evolution-empty-hint">
               {language === 'pt'

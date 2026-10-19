@@ -81,6 +81,59 @@ export function getDailySeries(
   return series
 }
 
+// Reuses DailySummary's shape for a week: "date" holds the week's start
+// (Sunday) instead of a single day, so the existing chart component needs
+// no new type — only a different label formatter (a date range instead
+// of a weekday name).
+export function getWeeklySeries(
+  log: NutritionLogEntry[],
+  targetCalories: number,
+  weeks: number,
+): DailySummary[] {
+  const today = new Date()
+  const currentWeekStart = new Date(today)
+  currentWeekStart.setDate(today.getDate() - today.getDay())
+  currentWeekStart.setHours(0, 0, 0, 0)
+
+  const series: DailySummary[] = []
+
+  for (let i = weeks - 1; i >= 0; i -= 1) {
+    const weekStart = new Date(currentWeekStart)
+    weekStart.setDate(currentWeekStart.getDate() - i * 7)
+
+    let hasEntries = false
+    let isCurrentWeek = false
+    const totals = { ...EMPTY_TOTALS }
+
+    for (let dayOffset = 0; dayOffset < 7; dayOffset += 1) {
+      const day = new Date(weekStart)
+      day.setDate(weekStart.getDate() + dayOffset)
+
+      const dayTotals = getTotalsForDay(log, day)
+      totals.calories += dayTotals.calories
+      totals.proteinGrams += dayTotals.proteinGrams
+      totals.carbsGrams += dayTotals.carbsGrams
+      totals.fatGrams += dayTotals.fatGrams
+
+      if (log.some((entry) => isSameDay(new Date(entry.timestamp), day))) {
+        hasEntries = true
+      }
+      if (isSameDay(day, today)) {
+        isCurrentWeek = true
+      }
+    }
+
+    const status =
+      !hasEntries || isCurrentWeek
+        ? null
+        : classifyStatus(totals.calories, targetCalories * 7)
+
+    series.push({ date: weekStart, totals, hasEntries, status })
+  }
+
+  return series
+}
+
 // A day counts toward the streak only when both calories and protein
 // landed "green" — today is never counted since it's still in progress.
 const MAX_STREAK_LOOKBACK_DAYS = 365

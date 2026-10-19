@@ -66,6 +66,42 @@
   font-weight: 700;
 }
 
+.evolution-chart-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.evolution-chart-card-header h2 {
+  margin: 0 0 16px;
+}
+
+.evolution-calendar-toggle {
+  margin-left: auto;
+}
+
+.evolution-period-toggle {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+.evolution-period-toggle .text-button {
+  width: auto;
+  margin-top: 0;
+  padding: 6px 16px;
+
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.evolution-period-toggle .text-button-active {
+  color: var(--color-text-primary);
+  background: var(--color-bg-elevated);
+  border-color: var(--color-accent);
+}
+
 .evolution-chart {
   display: grid;
   gap: 6px;
