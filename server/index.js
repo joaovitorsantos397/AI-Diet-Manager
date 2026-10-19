@@ -67,7 +67,7 @@ const TOOLS = [
       {
         name: 'remove_last_meal',
         description:
-          'Undo the most recently logged meal because its values were wrong. Never use this to add a meal that was simply never logged — that is log_meal, not this.',
+          'Undo the WHOLE most recently logged meal, including every item if it was logged as several log_meal calls. Use this only when the user wants that entire meal gone, not to fix one wrong value in it — for a single-item fix use remove_meal_by_number instead. Never use this to add a meal that was simply never logged — that is log_meal, not this.',
       },
       {
         name: 'remove_meal_by_number',

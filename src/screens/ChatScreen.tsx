@@ -21,6 +21,7 @@ import { calculateMacros } from '../services/macroCalculator'
 import { getEffectiveProfile } from '../services/weightLog'
 import { getTotalsForDay } from '../services/nutritionLog'
 import { isSameDay, resolveLoggedTimestamp } from '../utils/date'
+import { applyMealCorrections, dedupeMealEntries } from '../services/mealCorrections'
 import { resizeImageForUpload } from '../utils/image'
 import EvolutionScreen from './EvolutionScreen'
 
@@ -224,6 +225,11 @@ function ChatScreen({
       const newMealEntries: NutritionLogEntry[] = []
       let newWeightEntry: WeightLogEntry | null = null
       let newGoal: Goal | null = null
+      // Every log_meal call in this turn belongs to the same reported
+      // meal, even when the model splits it into several calls (one per
+      // food item) — shared so "remove the last meal" can remove it as a
+      // whole instead of one item at a time.
+      const mealGroupId = crypto.randomUUID()
 
       for (const call of functionCalls) {
         const args = call.args ?? {}
@@ -249,6 +255,7 @@ function ChatScreen({
               description:
                 typeof args.description === 'string' ? args.description : '',
               mealTime,
+              mealGroupId,
             })
             break
           }
@@ -303,28 +310,7 @@ function ChatScreen({
         }
       }
 
-      // Deterministic safety net: the model is instructed to call log_meal
-      // once per distinct item, but a single response calling it more than
-      // once for the exact same item (identical values) is never
-      // intentional — collapse those down to one entry instead of trusting
-      // prompt compliance alone for something this consequential.
-      const seenMealSignatures = new Set<string>()
-      const dedupedMealEntries = newMealEntries.filter((entry) => {
-        const signature = [
-          entry.calories,
-          entry.proteinGrams,
-          entry.carbsGrams,
-          entry.fatGrams,
-          entry.description,
-          entry.mealTime,
-        ].join('|')
-        if (seenMealSignatures.has(signature)) {
-          console.warn('Dropped duplicate log_meal call in the same reply:', entry)
-          return false
-        }
-        seenMealSignatures.add(signature)
-        return true
-      })
+      const dedupedMealEntries = dedupeMealEntries(newMealEntries)
 
       if (newBandejaoUser !== null) {
         setBandejaoUser(newBandejaoUser)
@@ -336,34 +322,14 @@ function ChatScreen({
         removeMealNumbers.length > 0 ||
         dedupedMealEntries.length > 0
       ) {
-        setNutritionLog((current) => {
-          // #N refers to the entry's position in "Today's logged meals" as
-          // the model actually read it (promptBuilder.ts sorts today's
-          // entries by timestamp ascending) — resolved against the
-          // pre-turn state, before any other change from this same turn.
-          const todaysEntryIds = current
-            .filter((entry) => isSameDay(new Date(entry.timestamp), new Date()))
-            .sort((a, b) => a.timestamp - b.timestamp)
-            .map((entry) => entry.id)
-          const idsToRemoveByNumber = new Set(
-            removeMealNumbers
-              .map((n) => todaysEntryIds[n - 1])
-              .filter((id): id is string => id !== undefined),
-          )
-
-          let updated = shouldClearToday
-            ? current.filter(
-                (logEntry) => !isSameDay(new Date(logEntry.timestamp), new Date()),
-              )
-            : current
-          updated = shouldRemoveLast ? updated.slice(0, -1) : updated
-          if (idsToRemoveByNumber.size > 0) {
-            updated = updated.filter(
-              (logEntry) => !idsToRemoveByNumber.has(logEntry.id),
-            )
-          }
-          return [...updated, ...dedupedMealEntries]
-        })
+        setNutritionLog((current) =>
+          applyMealCorrections(current, {
+            shouldClearToday,
+            shouldRemoveLast,
+            removeMealNumbers,
+            newMealEntries: dedupedMealEntries,
+          }),
+        )
       }
 
       if (newWeightEntry) {
