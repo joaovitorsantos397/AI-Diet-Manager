@@ -15,6 +15,9 @@ dist-ssr
 # Secrets
 .env
 
+# Local SQLite database file
+data/
+
 # Private notes — never pushed to GitHub (see academy-private/README.md)
 academy-private/
 
