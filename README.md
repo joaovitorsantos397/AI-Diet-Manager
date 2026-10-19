@@ -8,7 +8,7 @@ This project is currently being developed as a **Minimum Viable Product (MVP)**,
 
 # Overview
 
-A conversational AI nutrition coach, not just a calorie tracker. Five coach personalities, meal logging by text, photo or audio (Gemini vision and transcription), and progress tracking (calories, protein, weight, adherence streaks). User data is stored locally in the browser. A small Node/Express server keeps the Gemini API key out of the frontend and proxies the chat requests.
+A conversational AI nutrition coach, not just a calorie tracker. Five coach personalities, meal logging by text, and progress tracking. The model triggers typed function calls (log or remove a meal) instead of writing numbers as free text. User data is stored locally in the browser. A small Node/Express server keeps the Gemini API key out of the frontend and proxies the chat requests.
 
 ---
 
@@ -28,14 +28,15 @@ Rather than focusing solely on implementation, the project emphasizes maintainab
 Current implementation includes:
 
 - Conversational AI nutrition coach with five coach personalities
-- Meal logging by text, photo or audio (Gemini vision and transcription)
+- Meal logging by text
 - Progress tracking (calories, protein, weight, adherence streaks)
 - Totals computed by the app and passed to the model as context, to avoid hallucinated or double-counted numbers
 - Meal corrections (undo the last meal, undo a specific earlier item, or clear the day) via typed Gemini function calls, not free-text parsing
 - React + TypeScript architecture
 - Language selection
 - Automated test suite (Vitest) for the calorie/macro math and meal-correction logic
-- Dockerized backend with a CI pipeline (lint, build, test on every push/PR)
+- Dockerfile and docker-compose for the backend (image build not yet validated)
+- CI pipeline (lint, build, test on every push/PR)
 - Modular project structure
 - Technical documentation
 - Product documentation
@@ -176,7 +177,8 @@ npm test
 ## Running the backend with Docker
 
 As an alternative to `npm run server`, the backend can run in a
-container (frontend still runs separately with `npm run dev`):
+container (frontend still runs separately with `npm run dev`). The
+image build has not been validated yet:
 
 ```
 GEMINI_API_KEY=your-key-here docker compose up --build
@@ -194,7 +196,7 @@ for a quick liveness check.
   `{ reply }`) when it was migrated to Gemini function calling, and
   `transcriptionService.ts` was never updated to match — it always
   reads `undefined` and the user sees a generic "couldn't transcribe"
-  message. Logging via text or photo is unaffected. See
+  message. Text logging is unaffected. See
   `docs/03_DECISION_LOG.md` (2026-10-19) for details; left unfixed for
   now to prioritize test/Docker/CI coverage.
 
@@ -218,9 +220,3 @@ Planned features include:
 All rights reserved. This repository is public for portfolio and
 evaluation purposes only; see [LICENSE](https://github.com/joaovitorsantos397/AI-Diet-Manager/blob/main/LICENSE) for details. No
 permission is granted to reuse, redistribute, or sell this code.
-
----
-
-# Author
-
-Developed as part of a personal software engineering and product development journey, with the goal of creating a scalable AI-powered nutrition application.
