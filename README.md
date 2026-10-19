@@ -228,6 +228,58 @@ curl -X DELETE http://localhost:3001/api/meals/last -H "X-Profile-Id: joao"
 curl -X DELETE "http://localhost:3001/api/meals?date=2026-10-19" -H "X-Profile-Id: joao"
 ```
 
+## Demo do banco
+
+`scripts/demo-db.mjs` registra um café da manhã (2 itens) e um almoço
+(3 itens), lista e totaliza o dia, mostra totais por período, remove a
+última refeição e confirma que os 3 itens do almoço somem junto
+(`ON DELETE CASCADE`), e totaliza de novo pra mostrar a diferença. O
+servidor ainda exige `GEMINI_API_KEY` no `.env` pra subir, mesmo essa
+demo não usando IA.
+
+**Windows (PowerShell)** — num terminal:
+
+```powershell
+$env:DB_PATH = ".\data\demo.db"; npm run server
+```
+
+Em outro terminal:
+
+```powershell
+npm run demo:db
+```
+
+Pra rodar de novo do zero:
+
+```powershell
+Remove-Item .\data\demo.db
+```
+
+**Linux/macOS** — num terminal:
+
+```bash
+DB_PATH=./data/demo.db npm run server
+```
+
+Em outro terminal:
+
+```bash
+npm run demo:db
+```
+
+Pra rodar de novo do zero:
+
+```bash
+rm ./data/demo.db
+```
+
+Resultado esperado (executado e conferido em 2026-10-19): café da manhã
+e almoço registrados (820 kcal / 58 g proteína no total do dia); totais
+por período com uma única linha, `2026-10-19`; depois de remover a
+última refeição, a listagem do dia mostra só o café da manhã (o almoço
+e seus 3 itens saem juntos); e os totais caem para exatamente o que o
+café da manhã valia (240 kcal / 6 g proteína).
+
 ---
 
 # Known Issues

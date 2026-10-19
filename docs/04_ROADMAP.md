@@ -191,7 +191,11 @@ treated as reference data pending a stated quantity; the artificial
 for a second photo angle on an ambiguous plate instead of guessing.
 Audio logging also gained a confirm step: recordings are transcribed
 and shown back to the user (with a re-record option) before anything
-is sent as a real meal log.
+is sent as a real meal log. **Update (2026-10-19):** this currently
+does not work — `transcriptionService.ts` reads a response field the
+chat endpoint no longer sends since the function-calling migration.
+See `docs/03_DECISION_LOG.md` (2026-10-19) and the README's Known
+Issues section.
 
 Evolution tracking is now fully built out: calories/protein (7-day
 bars), weight/body fat (last 8 weigh-ins, logged from a stated
