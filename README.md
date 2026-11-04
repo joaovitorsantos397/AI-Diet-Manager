@@ -14,7 +14,7 @@ This project is currently being developed as a **Minimum Viable Product (MVP)**,
 
 # Overview
 
-A conversational AI nutrition coach, not just a calorie tracker. Five coach personalities, meal logging by text, and progress tracking. The model triggers typed function calls (log or remove a meal) instead of writing numbers as free text. User data is stored locally in the browser. A small Node/Express server keeps the Gemini API key out of the frontend and proxies the chat requests.
+A conversational AI nutrition coach, not just a calorie tracker. Five coach personalities, meal logging by text, and progress tracking. The model triggers typed function calls (log or remove a meal) instead of writing numbers as free text. User data is stored locally in the browser. A small Node/Express server keeps the Gemini API key out of the frontend and proxies the chat requests. A SQL-backed REST API for meals (SQLite) also exists on the server, but the interface does not use it yet.
 
 ---
 
@@ -86,7 +86,7 @@ Current implementation includes:
 - Automated test suite (Vitest) for the calorie/macro math and meal-correction logic
 - Dockerfile and docker-compose for the backend (not yet built or run — see "Running the backend with Docker")
 - CI pipeline (lint, build, test on every push/PR)
-- SQL-backed REST API for meal logging (SQLite via `node:sqlite`), not yet wired into the UI — see `docs/DATABASE.md`
+- SQL-backed REST API for meal logging (SQLite via `node:sqlite`), not yet wired into the UI; see `docs/DATABASE.md`
 - Modular project structure
 - Technical documentation
 - Product documentation
@@ -128,7 +128,7 @@ Development
 
 Future
 
-- Connect the UI to the SQLite layer (the database itself already exists)
+- UI integration with the SQL API
 - Authentication
 - Apple Health Integration
 
@@ -139,6 +139,7 @@ Future
 ```
 AI-Diet-Manager/
 
+├── .github/workflows/
 ├── data/        (SQLite files created at runtime; git-ignored)
 ├── docs/
 ├── legacy/
@@ -146,6 +147,8 @@ AI-Diet-Manager/
 ├── scripts/     (demo-db.mjs, the SQL demo)
 ├── server/      (Express API, SQLite layer)
 ├── src/         (React app)
+├── Dockerfile
+├── docker-compose.yml
 ├── README.md
 └── package.json
 ```
@@ -160,18 +163,18 @@ may exist locally but is empty and not tracked by Git.
 
 Detailed documentation is available in the `docs/` directory.
 
-| File                    | Description                            |
-| ----------------------- | -------------------------------------- |
-| 00\_PROJECT\_CONTEXT.md | General project overview               |
-| 01\_PRODUCT\_VISION.md  | Product vision                         |
-| 02\_ARCHITECTURE.md     | Technical architecture                 |
-| 03\_DECISION\_LOG.md    | Engineering decisions                  |
-| 04\_ROADMAP.md          | Project roadmap                        |
-| 05\_PROJECT\_FAQ.md     | Project FAQ and retrospective          |
-| 06\_DESIGN\_SYSTEM.md   | Visual and interaction design language |
+| File                    | Description                                 |
+| ----------------------- | ------------------------------------------- |
+| 00\_PROJECT\_CONTEXT.md | General project overview                    |
+| 01\_PRODUCT\_VISION.md  | Product vision                              |
+| 02\_ARCHITECTURE.md     | Technical architecture                      |
+| 03\_DECISION\_LOG.md    | Engineering decisions                       |
+| 04\_ROADMAP.md          | Project roadmap                             |
+| 05\_PROJECT\_FAQ.md     | Project FAQ and retrospective               |
+| 06\_DESIGN\_SYSTEM.md   | Visual and interaction design language      |
 | DATABASE.md             | SQL schema, query explanations, limitations |
 
-99\_AI\_CONTEXT.md is planned but not written yet — see 04\_ROADMAP.md.
+99\_AI\_CONTEXT.md is planned but not written yet; see 04\_ROADMAP.md.
 
 ---
 
@@ -269,8 +272,8 @@ container (`/app/data/diet.db`) is lost when the container is removed.
 
 A small SQL-backed REST API for meal logging lives alongside the chat
 proxy (see `docs/DATABASE.md` for the schema and query details). It
-has no UI consumer yet — the app itself still uses localStorage; this
-API is tested and usable on its own. `profile_id` comes from the
+has no UI consumer yet: the app itself still uses localStorage, and
+this API is tested and usable on its own. `profile_id` comes from the
 `X-Profile-Id` header (defaults to `default`).
 
 ```
@@ -304,13 +307,13 @@ curl -X DELETE "http://localhost:3001/api/meals?date=2026-10-19" -H "X-Profile-I
 ## Database demo
 
 `scripts/demo-db.mjs` logs a breakfast (2 items) and a lunch (3 items),
-lists and totals the day, shows totals per period, removes the last
+lists and totals the day, shows totals by date range, removes the last
 meal and confirms that the lunch's 3 items disappear with it
 (`ON DELETE CASCADE`), then totals again to show the difference. The
 server still requires `GEMINI_API_KEY` in `.env` to start, even though
-this demo does not use the AI.
+this demo does not use AI.
 
-**Windows (PowerShell)** — in one terminal:
+**Windows (PowerShell)**, in one terminal:
 
 ```powershell
 $env:DB_PATH = ".\data\demo.db"; npm run server
@@ -322,13 +325,13 @@ In another terminal:
 npm run demo:db
 ```
 
-To start over from scratch:
+To run it again from scratch:
 
 ```powershell
 Remove-Item .\data\demo.db
 ```
 
-**Linux/macOS** — in one terminal:
+**Linux/macOS**, in one terminal:
 
 ```bash
 DB_PATH=./data/demo.db npm run server
@@ -340,7 +343,7 @@ In another terminal:
 npm run demo:db
 ```
 
-To start over from scratch:
+To run it again from scratch:
 
 ```bash
 rm ./data/demo.db
@@ -348,7 +351,7 @@ rm ./data/demo.db
 
 Expected result (re-run and checked on 2026-11-03, on Windows with
 Node 24): breakfast and lunch are logged (820 kcal / 58 g protein for
-the day); totals per period return a single row, for the current day;
+the day); totals by date range return a single row, for the current day;
 after removing the last meal, the day's listing shows only the
 breakfast (the lunch and its 3 items go together); and the totals drop
 to exactly what the breakfast was worth (240 kcal / 6 g protein).
@@ -358,13 +361,20 @@ to exactly what the breakfast was worth (240 kcal / 6 g protein).
 # Known Issues
 
 - **Audio transcription is currently broken.** The chat endpoint's
-  response shape changed (`{ text, functionCalls}` instead of a plain
+  response shape changed (`{ text, functionCalls }` instead of a plain
   `{ reply }`) when it was migrated to Gemini function calling, and
-  `transcriptionService.ts` was never updated to match — it always
+  `transcriptionService.ts` was never updated to match; it always
   reads `undefined` and the user sees a generic "couldn't transcribe"
   message. Text logging is unaffected. See
   `docs/03_DECISION_LOG.md` (2026-10-19) for details; left unfixed for
   now to prioritize test/Docker/CI coverage.
+- **The SQL API is not wired into the UI.** The interface still reads
+  and writes localStorage; the API is tested and usable on its own
+  (see the API section).
+- **The Docker image has not been built or run.** The Dockerfile and
+  docker-compose file exist, but `docker build` and `docker compose up`
+  were never executed (Docker is not installed in the test environment).
+  See "Running the backend with Docker".
 
 ---
 
