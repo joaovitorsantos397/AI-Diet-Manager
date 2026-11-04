@@ -6,7 +6,7 @@ A chat-based nutrition coach: you tell it what you ate and it logs the meal.
 React + TypeScript frontend, with a Node/Express backend that proxies Google Gemini using function calling.
 A personal portfolio MVP — app data still lives in the browser (localStorage), not in a database.
 
-An AI-assisted nutrition application designed to provide personalized dietary guidance through a clean, scalable and user-centered experience.
+An AI-assisted nutrition application that gives personalized dietary guidance through a chat interface.
 
 This project is currently being developed as a **Minimum Viable Product (MVP)**, built as a personal technical portfolio project.
 
@@ -67,7 +67,7 @@ The project has two primary objectives:
 - Build a functional AI-powered nutrition application.
 - Demonstrate software engineering, product thinking and architectural decision-making throughout the development process.
 
-Rather than focusing solely on implementation, the project emphasizes maintainability, documentation and long-term scalability.
+Rather than focusing solely on implementation, the project emphasizes maintainability and documentation.
 
 ---
 
@@ -82,6 +82,7 @@ Current implementation includes:
 - Meal corrections (undo the last meal, undo a specific earlier item, or clear the day) via typed Gemini function calls, not free-text parsing
 - React + TypeScript architecture
 - Language selection
+- Optional Unicamp RU menu context from the separate Bandejão Tracker service (dev-proxy only)
 - Automated test suite (Vitest) for the calorie/macro math and meal-correction logic
 - Dockerfile and docker-compose for the backend (not yet built or run — see "Running the backend with Docker")
 - CI pipeline (lint, build, test on every push/PR)
@@ -127,7 +128,7 @@ Development
 
 Future
 
-- Database
+- Connect the UI to the SQLite layer (the database itself already exists)
 - Authentication
 - Apple Health Integration
 
@@ -138,14 +139,20 @@ Future
 ```
 AI-Diet-Manager/
 
+├── data/        (SQLite files created at runtime; git-ignored)
 ├── docs/
 ├── legacy/
 ├── public/
-├── server/
-├── src/
+├── scripts/     (demo-db.mjs, the SQL demo)
+├── server/      (Express API, SQLite layer)
+├── src/         (React app)
 ├── README.md
 └── package.json
 ```
+
+Tests are co-located with the code they cover (`*.test.ts` in `src/`,
+`*.test.js` in `server/`) and run with `npm test`. A `tests/` folder
+may exist locally but is empty and not tracked by Git.
 
 ---
 
@@ -212,6 +219,13 @@ npm run dev
 
 Both need to be running for the chat to work. The frontend alone
 will load, but AI replies require the backend.
+
+Optional — Bandejão Tracker: a separate project that serves today's
+Unicamp restaurant (RU) menu as JSON on port 3002. When it is running,
+the chat adds that menu to the coach's context. The frontend reaches it
+through the Vite dev-server proxy (`/bandejao` → `localhost:3002`), so
+this works only with `npm run dev`, not in a production build. If the
+service is not running, the chat works normally without the menu.
 
 Build for production:
 
@@ -287,57 +301,57 @@ curl -X DELETE http://localhost:3001/api/meals/last -H "X-Profile-Id: joao"
 curl -X DELETE "http://localhost:3001/api/meals?date=2026-10-19" -H "X-Profile-Id: joao"
 ```
 
-## Demo do banco
+## Database demo
 
-`scripts/demo-db.mjs` registra um café da manhã (2 itens) e um almoço
-(3 itens), lista e totaliza o dia, mostra totais por período, remove a
-última refeição e confirma que os 3 itens do almoço somem junto
-(`ON DELETE CASCADE`), e totaliza de novo pra mostrar a diferença. O
-servidor ainda exige `GEMINI_API_KEY` no `.env` pra subir, mesmo essa
-demo não usando IA.
+`scripts/demo-db.mjs` logs a breakfast (2 items) and a lunch (3 items),
+lists and totals the day, shows totals per period, removes the last
+meal and confirms that the lunch's 3 items disappear with it
+(`ON DELETE CASCADE`), then totals again to show the difference. The
+server still requires `GEMINI_API_KEY` in `.env` to start, even though
+this demo does not use the AI.
 
-**Windows (PowerShell)** — num terminal:
+**Windows (PowerShell)** — in one terminal:
 
 ```powershell
 $env:DB_PATH = ".\data\demo.db"; npm run server
 ```
 
-Em outro terminal:
+In another terminal:
 
 ```powershell
 npm run demo:db
 ```
 
-Pra rodar de novo do zero:
+To start over from scratch:
 
 ```powershell
 Remove-Item .\data\demo.db
 ```
 
-**Linux/macOS** — num terminal:
+**Linux/macOS** — in one terminal:
 
 ```bash
 DB_PATH=./data/demo.db npm run server
 ```
 
-Em outro terminal:
+In another terminal:
 
 ```bash
 npm run demo:db
 ```
 
-Pra rodar de novo do zero:
+To start over from scratch:
 
 ```bash
 rm ./data/demo.db
 ```
 
-Resultado esperado (executado e conferido em 2026-10-19): café da manhã
-e almoço registrados (820 kcal / 58 g proteína no total do dia); totais
-por período com uma única linha, `2026-10-19`; depois de remover a
-última refeição, a listagem do dia mostra só o café da manhã (o almoço
-e seus 3 itens saem juntos); e os totais caem para exatamente o que o
-café da manhã valia (240 kcal / 6 g proteína).
+Expected result (re-run and checked on 2026-11-03, on Windows with
+Node 24): breakfast and lunch are logged (820 kcal / 58 g protein for
+the day); totals per period return a single row, for the current day;
+after removing the last meal, the day's listing shows only the
+breakfast (the lunch and its 3 items go together); and the totals drop
+to exactly what the breakfast was worth (240 kcal / 6 g protein).
 
 ---
 
