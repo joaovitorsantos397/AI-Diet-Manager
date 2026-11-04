@@ -1,6 +1,12 @@
 # AI Diet Manager
 
-An AI-assisted nutrition application designed to provide personalized dietary guidance through a clean, scalable and user-centered experience.
+[![CI](https://github.com/joaovitorsantos397/AI-Diet-Manager/actions/workflows/ci.yml/badge.svg)](https://github.com/joaovitorsantos397/AI-Diet-Manager/actions/workflows/ci.yml)
+
+A chat-based nutrition coach: you tell it what you ate and it logs the meal.
+React + TypeScript frontend, with a Node/Express backend that proxies Google Gemini using function calling.
+A personal portfolio MVP — app data still lives in the browser (localStorage), not in a database.
+
+An AI-assisted nutrition application that gives personalized dietary guidance through a chat interface.
 
 This project is currently being developed as a **Minimum Viable Product (MVP)**, built as a personal technical portfolio project.
 
@@ -12,6 +18,48 @@ A conversational AI nutrition coach, not just a calorie tracker. Five coach pers
 
 ---
 
+# Architecture
+
+What exists today:
+
+```mermaid
+flowchart LR
+  subgraph Browser
+    UI["React + TypeScript UI"]
+    LS[("localStorage<br/>all app data today")]
+  end
+
+  subgraph Server["Node / Express server (port 3001)"]
+    CHAT["POST /api/chat"]
+    REST["/api/meals, /api/totals"]
+    DB[("SQLite<br/>node:sqlite")]
+  end
+
+  GEMINI["Gemini API<br/>function calling"]
+  BJ["Bandejão Tracker<br/>separate optional service, port 3002"]
+
+  UI <--> LS
+  UI -->|chat messages| CHAT
+  CHAT --> GEMINI
+  GEMINI -->|"text + function calls"| CHAT
+  CHAT -->|"text + functionCalls"| UI
+  REST --> DB
+  UI -. "not connected yet" .-> REST
+  UI -. "today's menu, via Vite dev proxy" .-> BJ
+```
+
+- The **SQLite / REST layer is not wired into the UI yet.** It is
+  tested and usable on its own (`curl`, or `npm run demo:db`), but the
+  app still reads and writes meals in localStorage.
+- Gemini does not change the log itself: the server returns its
+  function calls (`log_meal`, `remove_last_meal`, …) and the frontend
+  applies them.
+- The Bandejão Tracker is a separate project. The UI reaches it only
+  through the Vite dev proxy (`npm run dev`); if it is not running, the
+  chat carries on without menu context.
+
+---
+
 # Project Goals
 
 The project has two primary objectives:
@@ -19,7 +67,7 @@ The project has two primary objectives:
 - Build a functional AI-powered nutrition application.
 - Demonstrate software engineering, product thinking and architectural decision-making throughout the development process.
 
-Rather than focusing solely on implementation, the project emphasizes maintainability, documentation and long-term scalability.
+Rather than focusing solely on implementation, the project emphasizes maintainability and documentation.
 
 ---
 
@@ -34,8 +82,9 @@ Current implementation includes:
 - Meal corrections (undo the last meal, undo a specific earlier item, or clear the day) via typed Gemini function calls, not free-text parsing
 - React + TypeScript architecture
 - Language selection
+- Optional Unicamp RU menu context from the separate Bandejão Tracker service (dev-proxy only)
 - Automated test suite (Vitest) for the calorie/macro math and meal-correction logic
-- Dockerfile and docker-compose for the backend (image build not yet validated)
+- Dockerfile and docker-compose for the backend (not yet built or run — see "Running the backend with Docker")
 - CI pipeline (lint, build, test on every push/PR)
 - SQL-backed REST API for meal logging (SQLite via `node:sqlite`), not yet wired into the UI; see `docs/DATABASE.md`
 - Modular project structure
@@ -91,17 +140,22 @@ Future
 AI-Diet-Manager/
 
 ├── .github/workflows/
+├── data/        (SQLite files created at runtime; git-ignored)
 ├── docs/
 ├── legacy/
 ├── public/
-├── scripts/
-├── server/
-├── src/
+├── scripts/     (demo-db.mjs, the SQL demo)
+├── server/      (Express API, SQLite layer)
+├── src/         (React app)
 ├── Dockerfile
 ├── docker-compose.yml
 ├── README.md
 └── package.json
 ```
+
+Tests are co-located with the code they cover (`*.test.ts` in `src/`,
+`*.test.js` in `server/`) and run with `npm test`. A `tests/` folder
+may exist locally but is empty and not tracked by Git.
 
 ---
 
@@ -169,6 +223,13 @@ npm run dev
 Both need to be running for the chat to work. The frontend alone
 will load, but AI replies require the backend.
 
+Optional — Bandejão Tracker: a separate project that serves today's
+Unicamp restaurant (RU) menu as JSON on port 3002. When it is running,
+the chat adds that menu to the coach's context. The frontend reaches it
+through the Vite dev-server proxy (`/bandejao` → `localhost:3002`), so
+this works only with `npm run dev`, not in a production build. If the
+service is not running, the chat works normally without the menu.
+
 Build for production:
 
 ```
@@ -184,15 +245,26 @@ npm test
 ## Running the backend with Docker
 
 As an alternative to `npm run server`, the backend can run in a
-container (frontend still runs separately with `npm run dev`). The
-image build has not been validated yet:
+container (frontend still runs separately with `npm run dev`):
 
 ```
 GEMINI_API_KEY=your-key-here docker compose up --build
 ```
 
-This exposes the API on `http://localhost:3001`, with `GET /health`
-for a quick liveness check.
+This is meant to expose the API on `http://localhost:3001`, with
+`GET /health` for a quick liveness check.
+
+**Verification status:** `docker build` and `docker compose up` have
+**not been run** — Docker is not installed in the test environment
+and CI does not build the image, so whether the image builds and the
+container starts is unverified. What was checked without Docker: run
+directly with Node (`node server/index.js`), the server starts and
+`GET /health` returns `{"status":"ok"}`; and the Dockerfile copies
+`server/` plus the production dependencies, which covers what the
+server imports.
+
+The compose file defines no volume, so the SQLite file inside the
+container (`/app/data/diet.db`) is lost when the container is removed.
 
 ---
 
@@ -277,12 +349,12 @@ To run it again from scratch:
 rm ./data/demo.db
 ```
 
-Expected result (run and checked on 2026-10-19): breakfast and lunch
-logged (820 kcal / 58 g protein for the day); totals by range with a
-single row, `2026-10-19`; after removing the last meal, the day's list
-shows only the breakfast (the lunch and its 3 items are gone together);
-and the totals drop to exactly what the breakfast was worth
-(240 kcal / 6 g protein).
+Expected result (re-run and checked on 2026-11-03, on Windows with
+Node 24): breakfast and lunch are logged (820 kcal / 58 g protein for
+the day); totals by date range return a single row, for the current day;
+after removing the last meal, the day's listing shows only the
+breakfast (the lunch and its 3 items go together); and the totals drop
+to exactly what the breakfast was worth (240 kcal / 6 g protein).
 
 ---
 
@@ -299,8 +371,10 @@ and the totals drop to exactly what the breakfast was worth
 - **The SQL API is not wired into the UI.** The interface still reads
   and writes localStorage; the API is tested and usable on its own
   (see the API section).
-- **The Docker image build has not been validated.** The Dockerfile and
-  docker-compose file exist, but the image has not been built end to end.
+- **The Docker image has not been built or run.** The Dockerfile and
+  docker-compose file exist, but `docker build` and `docker compose up`
+  were never executed (Docker is not installed in the test environment).
+  See "Running the backend with Docker".
 
 ---
 
