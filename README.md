@@ -35,7 +35,7 @@ Current implementation includes:
 - React + TypeScript architecture
 - Language selection
 - Automated test suite (Vitest) for the calorie/macro math and meal-correction logic
-- Dockerfile and docker-compose for the backend (image build not yet validated)
+- Dockerfile and docker-compose for the backend (not yet built or run — see "Running the backend with Docker")
 - CI pipeline (lint, build, test on every push/PR)
 - SQL-backed REST API for meal logging (SQLite via `node:sqlite`), not yet wired into the UI — see `docs/DATABASE.md`
 - Modular project structure
@@ -180,15 +180,26 @@ npm test
 ## Running the backend with Docker
 
 As an alternative to `npm run server`, the backend can run in a
-container (frontend still runs separately with `npm run dev`). The
-image build has not been validated yet:
+container (frontend still runs separately with `npm run dev`):
 
 ```
 GEMINI_API_KEY=your-key-here docker compose up --build
 ```
 
-This exposes the API on `http://localhost:3001`, with `GET /health`
-for a quick liveness check.
+This is meant to expose the API on `http://localhost:3001`, with
+`GET /health` for a quick liveness check.
+
+**Verification status:** `docker build` and `docker compose up` have
+**not been run** — Docker is not installed in the test environment
+and CI does not build the image, so whether the image builds and the
+container starts is unverified. What was checked without Docker: run
+directly with Node (`node server/index.js`), the server starts and
+`GET /health` returns `{"status":"ok"}`; and the Dockerfile copies
+`server/` plus the production dependencies, which covers what the
+server imports.
+
+The compose file defines no volume, so the SQLite file inside the
+container (`/app/data/diet.db`) is lost when the container is removed.
 
 ---
 
