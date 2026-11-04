@@ -1,5 +1,11 @@
 # AI Diet Manager
 
+[![CI](https://github.com/joaovitorsantos397/AI-Diet-Manager/actions/workflows/ci.yml/badge.svg)](https://github.com/joaovitorsantos397/AI-Diet-Manager/actions/workflows/ci.yml)
+
+A chat-based nutrition coach: you tell it what you ate and it logs the meal.
+React + TypeScript frontend, with a Node/Express backend that proxies Google Gemini using function calling.
+A personal portfolio MVP — app data still lives in the browser (localStorage), not in a database.
+
 An AI-assisted nutrition application designed to provide personalized dietary guidance through a clean, scalable and user-centered experience.
 
 This project is currently being developed as a **Minimum Viable Product (MVP)**, built as a personal technical portfolio project.
@@ -9,6 +15,48 @@ This project is currently being developed as a **Minimum Viable Product (MVP)**,
 # Overview
 
 A conversational AI nutrition coach, not just a calorie tracker. Five coach personalities, meal logging by text, and progress tracking. The model triggers typed function calls (log or remove a meal) instead of writing numbers as free text. User data is stored locally in the browser. A small Node/Express server keeps the Gemini API key out of the frontend and proxies the chat requests.
+
+---
+
+# Architecture
+
+What exists today:
+
+```mermaid
+flowchart LR
+  subgraph Browser
+    UI["React + TypeScript UI"]
+    LS[("localStorage<br/>all app data today")]
+  end
+
+  subgraph Server["Node / Express server (port 3001)"]
+    CHAT["POST /api/chat"]
+    REST["/api/meals, /api/totals"]
+    DB[("SQLite<br/>node:sqlite")]
+  end
+
+  GEMINI["Gemini API<br/>function calling"]
+  BJ["Bandejão Tracker<br/>separate optional service, port 3002"]
+
+  UI <--> LS
+  UI -->|chat messages| CHAT
+  CHAT --> GEMINI
+  GEMINI -->|"text + function calls"| CHAT
+  CHAT -->|"text + functionCalls"| UI
+  REST --> DB
+  UI -. "not connected yet" .-> REST
+  UI -. "today's menu, via Vite dev proxy" .-> BJ
+```
+
+- The **SQLite / REST layer is not wired into the UI yet.** It is
+  tested and usable on its own (`curl`, or `npm run demo:db`), but the
+  app still reads and writes meals in localStorage.
+- Gemini does not change the log itself: the server returns its
+  function calls (`log_meal`, `remove_last_meal`, …) and the frontend
+  applies them.
+- The Bandejão Tracker is a separate project. The UI reaches it only
+  through the Vite dev proxy (`npm run dev`); if it is not running, the
+  chat carries on without menu context.
 
 ---
 
